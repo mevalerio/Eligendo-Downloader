@@ -1,0 +1,61 @@
+{
+  "name": "eligendo-data-downloader",
+  "version": "1.0.0",
+  "description": "A comprehensive TypeScript-based tool for downloading and analyzing Italian municipal election data from Eligendo",
+  "main": "dist/main.js",
+  "types": "dist/types/index.d.ts",
+  "scripts": {
+    "start": "ts-node src/main.ts",
+    "build": "tsc",
+    "test": "jest",
+    "dev": "ts-node src/municipal-demo.ts",
+    "query": "ts-node src/municipal-query.ts",
+    "demo": "ts-node src/demo.ts",
+    "lint": "echo 'Linting not configured yet'",
+    "clean": "if exist dist rmdir /s /q dist",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "keywords": [
+    "italian-elections",
+    "eligendo",
+    "municipal-data",
+    "election-analysis",
+    "typescript",
+    "italy",
+    "politics",
+    "voting",
+    "data-analysis"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mevalerio/Eligendo-Downloader.git"
+  },
+  "homepage": "https://github.com/mevalerio/Eligendo-Downloader#readme",
+  "bugs": {
+    "url": "https://github.com/mevalerio/Eligendo-Downloader/issues"
+  },
+  "dependencies": {
+    "axios": "^0.21.1"
+  },
+  "devDependencies": {
+    "typescript": "^4.4.4",
+    "ts-node": "^10.4.0",
+    "jest": "^27.0.6",
+    "@types/jest": "^27.0.2",
+    "@types/node": "^16.11.7"
+  },
+  "author": "Your Name <your.email@example.com>",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=7.0.0"
+  },
+  "files": [
+    "dist/",
+    "data/",
+    "docs/",
+    "*.md",
+    "*.ps1",
+    "*.js"
+  ]
+}
