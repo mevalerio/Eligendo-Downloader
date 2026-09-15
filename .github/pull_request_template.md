@@ -1,49 +1,16 @@
----
-name: Pull Request
-about: Create a pull request to contribute to the project
-title: ''
-labels: ''
-assignees: ''
+## Summary
 
----
+Describe the purpose and scope of the change.
 
-## Description
-Brief description of the changes in this PR.
+## Source-data impact
 
-## Type of Change
-- [ ] 🐛 Bug fix (non-breaking change which fixes an issue)
-- [ ] ✨ New feature (non-breaking change which adds functionality)
-- [ ] 💥 Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] 📚 Documentation update
-- [ ] 🔧 Code refactoring
-- [ ] ⚡ Performance improvement
-- [ ] 🧪 Test addition or improvement
+List the election types, years, file formats, or source columns affected. State
+"none" when the change does not affect parsing or normalisation.
 
-## Related Issues
-Fixes #(issue number)
+## Verification
 
-## Changes Made
-- [ ] Change 1
-- [ ] Change 2
-- [ ] Change 3
-
-## Testing
-- [ ] Tests pass locally with my changes
-- [ ] I have added tests that prove my fix is effective or that my feature works
-- [ ] New and existing unit tests pass locally with my changes
-- [ ] I have tested the PowerShell scripts on Windows
-- [ ] I have tested the TypeScript API functionality
-
-## Screenshots (if applicable)
-Add screenshots to help explain your changes.
-
-## Checklist
-- [ ] My code follows the style guidelines of this project
-- [ ] I have performed a self-review of my own code
-- [ ] I have commented my code, particularly in hard-to-understand areas
-- [ ] I have made corresponding changes to the documentation
-- [ ] My changes generate no new warnings
-- [ ] Any dependent changes have been merged and published
-
-## Additional Notes
-Any additional information that reviewers should know.
+- [ ] `pytest -q` passes
+- [ ] New source formats or aliases have fixture-based tests
+- [ ] API or data-dictionary changes are documented
+- [ ] No archives, databases, credentials, caches, or virtual environments are included
+- [ ] The branch is rebased on the current target branch

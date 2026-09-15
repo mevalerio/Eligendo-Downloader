@@ -1,323 +1,246 @@
-# 🇮🇹 Eligendo Data Downloader
+# Eligendo API
 
-A comprehensive TypeScript-based tool for downloading and analyzing Italian municipal election data from Eligendo.
+Eligendo API is an independent local service for downloading, normalising, and
+querying data from the Italian Ministry of the Interior's
+[historical election archive](https://elezionistorico.interno.gov.it/).
 
-[![Node.js](https://img.shields.io/badge/Node.js-22.x-green.svg)](https://nodejs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-4.4+-blue.svg)](https://www.typescriptlang.org/)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![GitHub release](https://img.shields.io/github/release/mevalerio/Eligendo-Downloader.svg)](https://github.com/mevalerio/Eligendo-Downloader/releases)
-[![Build Status](https://github.com/mevalerio/Eligendo-Downloader/workflows/CI%2FCD%20Pipeline/badge.svg)](https://github.com/mevalerio/Eligendo-Downloader/actions)
-[![GitHub stars](https://img.shields.io/github/stars/mevalerio/Eligendo-Downloader.svg)](https://github.com/mevalerio/Eligendo-Downloader/stargazers)
+The service combines two sources from the same official portal:
 
-## 🌟 Features
+1. **Open Data archives**, intended for bulk downloads by election; and
+2. **municipality-level HTML pages**, which reproduce the summaries shown on
+   the website, including turnout, ballots, candidates, lists, votes,
+   percentages, and seats.
 
-- **📊 Municipal Election Data Processing** - Download and parse Italian municipal election results
-- **🔍 Advanced Query System** - Query results by municipality name and date
-- **🏛️ Geographic Breakdown** - Results organized by Province and Region
-- **📈 Statistical Analysis** - Turnout rates, vote percentages, and winner analysis
-- **🎯 Multiple Access Methods** - PowerShell scripts, command-line tools, and programmatic API
-- **🇮🇹 Italian Municipalities Support** - Built for Italian electoral system
+Imported records are stored in SQLite. Municipal party results are also exposed
+in the uniform format:
 
-## 🚀 Quick Start
+```text
+DATA;COMUNE;PARTITO;VOTI
+```
 
-### Prerequisites
+The field names in that compact export remain in Italian to match the requested
+research format and the terminology used by the source. API documentation is
+generated automatically with Swagger UI.
 
-- **Node.js 16.x or higher** ([Download here](https://nodejs.org/))
-- **Windows** with PowerShell (primary support)
+## Requirements
 
-### Installation
+- Python 3.11 or later
+- Network access to the two allow-listed Ministry domains
+- Sufficient local storage for downloaded archives and the SQLite database
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/mevalerio/Eligendo-Downloader.git
-   cd Eligendo-Downloader
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Verify installation**
-   ```powershell
-   .\verify-for-publication.ps1
-   ```
-
-4. **Run the demo**
-   ```powershell
-   .\run-municipal-demo.ps1
-   ```
-
-## 📖 Usage
-
-### 🏛️ Query Municipal Results
-
-**Get election results for any Italian municipality:**
+## Quick start
 
 ```powershell
-# Query Milano results
-.\demo-query.ps1 Milano
-
-# Query Roma with specific date
-.\demo-query.ps1 Roma 2024-06-08
-
-# List all available municipalities
-.\demo-query.ps1 --list
-
-# Show winners for all cities
-.\demo-query.ps1 --winners
+cd outputs\eligendo-api
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+uvicorn app.main:app --reload
 ```
 
-**Example Output:**
-```
-🏛️ === MILANO ELECTION RESULTS ===
-📍 Location: Milano, Lombardia
-👥 Total Voters: 850,000
-🗳️ Total Votes: 680,000
-📈 Turnout: 80.0%
+Open <http://127.0.0.1:8000/docs> to explore and run the API.
 
-🎯 PARTY RESULTS:
-🥇 1. Partito Democratico
-     🗳️ Votes: 272,000 (40.0%)
-     👤 Giuseppe Sala: 272,000 votes
+## Municipal results by year
 
-🥈 2. Lega
-     🗳️ Votes: 204,000 (30.0%)
-     👤 Luca Bernardo: 204,000 votes
-```
-
-### 🔧 Programmatic API
-
-```typescript
-import { EligendoMunicipalAPI } from './src/eligendo-api';
-
-const api = new EligendoMunicipalAPI();
-
-// Get full results for a municipality
-const result = await api.getMunicipalityResults('Milano', '2024-06-08');
-
-// Get simplified party results
-const parties = await api.getPartyResults('Roma');
-
-// Get winning party
-const winner = await api.getWinningParty('Napoli');
-
-// Search municipalities
-const cities = await api.searchMunicipalities('mil');
-```
-
-### 📊 Available Demo Data
-
-The system includes demo data for major Italian cities:
-
-- **Milano** (Lombardia) - 850,000 voters, 80.0% turnout
-- **Roma** (Lazio) - 1,200,000 voters, 75.0% turnout  
-- **Napoli** (Campania) - 650,000 voters, 70.0% turnout
-
-## 🏗️ Project Structure
-
-```
-eligendo-data-downloader/
-├── src/
-│   ├── main.ts                    # Main application entry
-│   ├── eligendo-api.ts           # Programmatic API
-│   ├── municipal-query.ts        # Command-line query tool
-│   ├── downloader/
-│   │   ├── eligendo-client.ts    # API client for Eligendo
-│   │   ├── data-parser.ts        # Basic election data parser
-│   │   └── municipal-data-parser.ts # Municipal-level parser
-│   ├── services/
-│   │   └── municipal-query-service.ts # Core query logic
-│   ├── types/
-│   │   └── index.ts              # TypeScript type definitions
-│   └── utils/
-│       ├── file-manager.ts       # File I/O operations
-│       └── logger.ts             # Logging utilities
-├── data/                         # Generated election data
-├── config/                       # Configuration files
-├── demo-query.ps1               # PowerShell query interface
-├── run-municipal-demo.ps1       # Municipal demo script
-└── docs/                        # Documentation
-```
-
-## 🎯 Commands Reference
-
-### PowerShell Scripts (Recommended)
-
-| Script | Description |
-|--------|-------------|
-| `.\demo-query.ps1 <municipality>` | Query specific municipality |
-| `.\demo-query.ps1 --list` | Show all municipalities |
-| `.\demo-query.ps1 --winners` | Show winners for all cities |
-| `.\run-municipal-demo.ps1` | Run complete municipal demo |
-| `.\run-demo.ps1` | Run basic candidate demo |
-
-### Command Line Tools
-
-```bash
-# Compile TypeScript
-npm run build
-
-# Query municipality
-node dist/municipal-query.js Milano
-
-# Search municipalities  
-node dist/municipal-query.js --search "mil"
-
-# Show available dates
-node dist/municipal-query.js --dates
-```
-
-### NPM Scripts
-
-```bash
-npm start          # Run main application
-npm run build      # Compile TypeScript
-npm test           # Run tests (if available)
-```
-
-## 📊 Data Format
-
-### Municipal Election Data Structure
-
-```json
-{
-  "electionId": "elezioni-comunali-2024",
-  "electionDate": "2024-06-08",
-  "electionType": "municipal",
-  "municipalities": [
-    {
-      "municipalityId": "milano",
-      "municipalityName": "Milano",
-      "province": "Milano",
-      "region": "Lombardia",
-      "totalVoters": 850000,
-      "totalVotes": 680000,
-      "turnout": 80.0,
-      "parties": [
-        {
-          "partyId": "pd",
-          "partyName": "Partito Democratico",
-          "votes": 272000,
-          "percentage": 40.0,
-          "candidates": [
-            {
-              "candidateId": "sala-milano",
-              "candidateName": "Giuseppe Sala",
-              "votes": 272000
-            }
-          ]
-        }
-      ]
-    }
-  ]
-}
-```
-
-## 🔧 Configuration
-
-### API Configuration (`config/default.json`)
-
-```json
-{
-  "apiEndpoint": "https://api.eligendo.it/elections",
-  "auth": {
-    "username": "your_username",
-    "password": "your_password"
-  },
-  "dataFetchInterval": 3600,
-  "outputDirectory": "./data",
-  "logLevel": "info"
-}
-```
-
-## 🔌 Real API Integration
-
-To connect to the actual Eligendo API:
-
-1. **Update credentials** in `config/default.json`
-2. **Modify API endpoints** in `src/downloader/eligendo-client.ts`
-3. **Configure authentication** as required by Eligendo
-4. **Run**: `npm start`
-
-## 🧪 Testing
-
-Run the municipal demo to verify everything works:
+### Import every municipal election held in a year
 
 ```powershell
-# Test basic functionality
-.\run-municipal-demo.ps1
+$body = @{
+  year = 2021
+  continue_on_error = $true
+} | ConvertTo-Json
 
-# Test query functionality
-.\demo-query.ps1 Milano
-
-# Test with all municipalities
-.\demo-query.ps1 --winners
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8000/api/v1/municipal/import-year `
+  -ContentType application/json `
+  -Body $body
 ```
 
-## 📝 Documentation
+The official catalogue may contain several municipal elections for the same
+year. The endpoint finds and imports every matching archive. TXT, CSV, and XLSX
+files contained in the official ZIP archives are supported.
 
-- **[Query Guide](QUERY-GUIDE.md)** - Complete query documentation
-- **[Query Examples](QUERY-RESULTS.md)** - Example query results
-- **[Working Guide](WORKING.md)** - Setup and troubleshooting
+### Query the compact party-result format
 
-## 🤝 Contributing
+Paginated JSON:
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+```text
+GET /api/v1/municipal/party-results?year=2021&limit=1000&offset=0
+```
 
-## 📋 Requirements
+Complete CSV for the year:
 
-- **Node.js** 16.x or higher
-- **TypeScript** 4.4 or higher
-- **Windows** (primary), Linux/macOS (experimental)
-- **PowerShell** (for scripts)
+```text
+GET /api/v1/municipal/party-results.csv?year=2021
+```
 
-## 🔒 License
+The CSV is encoded as UTF-8 with a byte-order mark and uses semicolons, which
+makes it suitable for common continental European spreadsheet settings. Its
+columns are:
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+```text
+DATA;COMUNE;PARTITO;VOTI
+```
 
-## 🙏 Acknowledgments
+To include region, province, ballot round, candidate, seats, and source
+references:
 
-- **Eligendo** for providing Italian electoral data
-- **Node.js community** for excellent tooling
-- **TypeScript team** for type safety
+```text
+GET /api/v1/municipal/party-results.csv?year=2021&dettagliato=true
+```
 
-## 📞 Support
+The filters `year`, `election_date`, `comune`, `provincia`, and
+`partito` may be combined. By default, results include the first round and
+historical records without a round field. This avoids counting list votes again
+when the same values appear in run-off rows. To retrieve every original round:
 
-- **Issues**: [GitHub Issues](https://github.com/yourusername/eligendo-data-downloader/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/eligendo-data-downloader/discussions)
+```text
+GET /api/v1/municipal/party-results?year=2021&tutti_turni=true
+```
 
-## 🗺️ Roadmap
+Distinct civic lists that share a name remain separate source rows. The detailed
+export identifies them through the candidate and source-row fields.
 
-- [ ] **Multiple Election Types** - Support for regional and national elections
-- [ ] **Real-time Data** - Live election result streaming
-- [ ] **Data Visualization** - Built-in charts and graphs
-- [ ] **Export Formats** - CSV, Excel, and PDF export
-- [ ] **REST API** - HTTP API for external integrations
-- [ ] **Docker Support** - Containerized deployment
+## General archive access
 
----
+### Browse the official catalogue
 
-**Made with ❤️ for Italian Democracy** 🇮🇹
+```text
+GET /api/v1/catalogue?category=assemblea_costituente&year=1946
+```
 
-## Quick Publish to GitHub
+| Page code | Open Data category | Election type |
+|---|---|---|
+| `A` | `assemblea_costituente` | Constituent Assembly |
+| `C` | `camera` | Chamber of Deputies |
+| `S` | `senato` | Senate of the Republic |
+| `E` | `europee` | European Parliament |
+| `F` | `referendum` | Referendum |
+| `R` | `regionali` | Regional elections |
+| `P` | `provinciali` | Provincial elections |
+| `G` | `comunali` | Municipal elections |
 
-If you want to publish this project to your own GitHub repository:
+### Import one election
 
 ```powershell
-# Run the automated publication script
-.\publish-to-github.ps1
+$body = @{
+  category = "assemblea_costituente"
+  election_date = "1946-06-02"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8000/api/v1/archives/import `
+  -ContentType application/json `
+  -Body $body
 ```
 
-This script will:
-- ✅ Update package.json with your GitHub information
-- ✅ Run all pre-publication tests
-- ✅ Set up Git repository and create initial commit
-- ✅ Provide step-by-step GitHub setup instructions
-- ✅ Open GitHub in your browser to create the repository
+The service downloads the corresponding official ZIP archive, calculates its
+SHA-256 digest, normalises column names, and atomically replaces any previous
+import of the same election.
 
-### Manual Installation
+### Query one municipality
+
+```text
+GET /api/v1/archives/results?category=assemblea_costituente&election_date=1946-06-02&comune=CASSINO
+```
+
+The response retains the original columns with normalised `snake_case` names.
+Each row also contains `_meta`, which records the source file and row number.
+To list all municipalities found in an imported election:
+
+```text
+GET /api/v1/archives/municipalities?category=assemblea_costituente&election_date=1946-06-02
+```
+
+### Parse an exact archive page
+
+```powershell
+$body = @{
+  url = "https://elezionistorico.interno.gov.it/index.php?tpel=A&dtel=02/06/1946&tpa=I&tpe=C&lev0=0&levsut0=0&lev1=20&levsut1=1&lev2=33&levsut2=2&levsut3=3&ne1=20&ne2=33&es0=S&es1=S&es2=S&es3=N&ms=S&ne3=330190&lev3=190"
+  store = $true
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8000/api/v1/pages/parse `
+  -ContentType application/json `
+  -Body $body
+```
+
+The response distinguishes `candidate`, `list`, `coalition_total`,
+`total`, and `option` records. Municipal lists contain a `parent_id`
+linking them to their candidate.
+
+## Endpoint summary
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/health` | Report service status |
+| `GET` | `/api/v1/catalogue` | List and filter official archives |
+| `POST` | `/api/v1/archives/import` | Download and import one election |
+| `GET` | `/api/v1/archives/results` | Search by election, municipality, and province |
+| `GET` | `/api/v1/archives/municipalities` | List municipalities in an imported election |
+| `POST` | `/api/v1/pages/parse` | Parse one exact archive URL |
+| `POST` | `/api/v1/municipal/import-year` | Import all municipal elections for a year |
+| `GET` | `/api/v1/municipal/party-results` | Return normalised party results as JSON |
+| `GET` | `/api/v1/municipal/party-results.csv` | Export filtered results as CSV |
+
+## Docker
+
+```powershell
+docker build -t eligendo-api .
+docker run --rm -p 8000:8000 -v eligendo-data:/service/data eligendo-api
+```
+
+## Configuration
+
+| Environment variable | Default | Meaning |
+|---|---:|---|
+| `ELIGENDO_DATA_DIR` | `./data` | Local data directory |
+| `ELIGENDO_DATABASE_PATH` | `./data/eligendo.sqlite3` | SQLite database path |
+| `ELIGENDO_REQUEST_INTERVAL_SECONDS` | `0.8` | Minimum delay between requests |
+| `ELIGENDO_REQUEST_TIMEOUT_SECONDS` | `30` | HTTP timeout |
+| `ELIGENDO_CATALOGUE_TTL_SECONDS` | `3600` | Catalogue cache lifetime |
+| `ELIGENDO_MAX_ARCHIVE_BYTES` | `262144000` | Compressed ZIP size limit |
+| `ELIGENDO_MAX_UNCOMPRESSED_BYTES` | `2147483648` | Extracted ZIP size limit |
+
+## Data integrity and safety
+
+- Only HTTPS URLs on the Ministry's two allow-listed domains are accepted.
+- Every redirect target is validated before it is followed.
+- Requests are rate-limited and the official catalogue is cached.
+- ZIP archives are checked for configured size limits and unsafe paths.
+- TXT, CSV, and XLSX values are read without forcing dates and numbers to text.
+- Each imported archive is identified by a SHA-256 digest.
+- SQLite transactions prevent partially imported elections.
+
+Party and list labels are preserved as published. They are not harmonised
+across years, spelling variants, coalitions, or successor organisations.
+Researchers requiring longitudinal party series should add a separate,
+versioned concordance rather than altering the source label.
+
+See [Data dictionary](docs/DATA_DICTIONARY.md),
+[Architecture](docs/ARCHITECTURE.md), and
+[Git workflow](docs/GIT_WORKFLOW.md) for further details.
+
+## Tests
+
+```powershell
+pytest -q
+```
+
+The test suite uses local fixtures and does not require the live Ministry
+website.
+
+## Project status and attribution
+
+This project is an independent client and is not an official API of the Italian
+Ministry of the Interior. Bulk collections should use the official Open Data
+archives. HTML parsing is intended for validation, supplementation, or fallback
+use, subject to the source website's terms and a prudent request interval.
+
+## Licence
+
+Eligendo API is distributed under the [MIT Licence](LICENSE).

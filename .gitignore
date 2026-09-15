@@ -1,58 +1,15 @@
-# Dependencies
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Build outputs
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+data/
+*.sqlite
+*.sqlite3
+*.db
+.coverage
+htmlcov/
 dist/
 build/
-*.tsbuildinfo
-
-# Environment variables
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# IDE
-.vscode/
+*.egg-info/
 .idea/
-*.swp
-*.swo
-
-# OS generated files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# Logs
-logs/
-*.log
-
-# Runtime data
-pids/
-*.pid
-*.seed
-*.pid.lock
-
-# Coverage directory used by tools like istanbul
-coverage/
-.nyc_output
-
-# Temporary files
-.tmp/
-temp/
-
-# Output files
-output/
-downloads/
-cache/
-
-# Test output
-test-output.json
+.vscode/
