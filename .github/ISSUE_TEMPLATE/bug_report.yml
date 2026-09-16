@@ -1,55 +1,36 @@
-name: Bug Report
-description: File a bug report to help us improve
+name: Bug report
+description: Report reproducible incorrect behaviour
 title: "[BUG] "
 labels: ["bug", "triage"]
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Thanks for taking the time to fill out this bug report! 🇮🇹
-
-  - type: input
-    id: contact
-    attributes:
-      label: Contact Details
-      description: How can we get in touch with you if we need more info?
-      placeholder: ex. email@example.com
-    validations:
-      required: false
-
   - type: dropdown
     id: component
     attributes:
       label: Component
-      description: Which component is affected?
       options:
-        - Municipal Query Service
-        - PowerShell Scripts
-        - TypeScript API
-        - Data Parser
+        - Open Data catalogue
+        - Archive import
+        - HTML page parser
+        - Municipal party results
+        - JSON or CSV API
         - Documentation
         - Other
     validations:
       required: true
 
   - type: textarea
-    id: what-happened
+    id: observed
     attributes:
-      label: What happened?
-      description: Also tell us, what did you expect to happen?
-      placeholder: Tell us what you see!
+      label: Observed behaviour
+      description: Describe what happened and what you expected.
     validations:
       required: true
 
   - type: textarea
     id: reproduce
     attributes:
-      label: Steps to reproduce
-      description: How can we reproduce this issue?
-      placeholder: |
-        1. Run command '...'
-        2. Query municipality '...'
-        3. See error
+      label: Reproduction steps
+      description: Include the endpoint, parameters, election date, and source filename where relevant.
     validations:
       required: true
 
@@ -57,20 +38,25 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: What environment are you running in?
       placeholder: |
-        - OS: Windows 10
-        - Node.js: v18.0.0
-        - PowerShell: 5.1
-        - TypeScript: 4.4.4
+        - OS:
+        - Python:
+        - Eligendo API revision:
     validations:
       required: true
+
+  - type: textarea
+    id: provenance
+    attributes:
+      label: Source provenance
+      description: Provide the official URL, archive filename, and SHA-256 digest when available.
+    validations:
+      required: false
 
   - type: textarea
     id: logs
     attributes:
       label: Relevant log output
-      description: Please copy and paste any relevant log output.
       render: shell
     validations:
       required: false

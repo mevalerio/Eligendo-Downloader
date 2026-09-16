@@ -1,69 +1,27 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable project changes are documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## Unreleased
 
-## [1.0.0] - 2025-07-08
+## 2.0.0
 
-### Added
-- 🇮🇹 Initial release of Eligendo Data Downloader
-- 📊 Municipal election data processing for Italian municipalities
-- 🔍 Advanced query system with multiple access methods
-- 🏛️ Geographic breakdown by Province and Region
-- 📈 Statistical analysis with turnout rates and winner calculation
-- 🎯 PowerShell scripts for easy command-line access
-- 📖 TypeScript API for programmatic access
-- 🗂️ Mock Italian election data for Milano, Roma, and Napoli
-- 📋 Comprehensive documentation and examples
+- Replaced the TypeScript demonstration application with a Python FastAPI
+  service backed by official Ministry archives.
+- Added official Open Data catalogue parsing and archive import.
+- Added annual import of all municipal elections in the official catalogue.
+- Added normalised municipal party results in JSON and CSV.
+- Added first-round defaults to prevent repeated run-off list votes.
+- Added detailed provenance fields for municipality-level results.
+- Added TXT, CSV, and XLSX ingestion from official ZIP archives.
+- Added municipality-level queries over imported rows.
+- Added parsing and optional storage of exact historical archive pages.
+- Added host allow-listing, redirect validation, rate limiting, archive limits,
+  SHA-256 digests, and transactional imports.
+- Rewrote project, API, architecture, and data documentation in English.
+- Added Python 3.11–3.13 testing through GitHub Actions.
 
-### Features
-- **MunicipalQueryService**: Core service for querying municipal data
-- **EligendoMunicipalAPI**: High-level API interface
-- **PowerShell Integration**: Native Windows PowerShell support
-- **Multiple Query Methods**: Search by name, province, region, date
-- **Data Analytics**: Turnout analysis, winner determination, vote percentages
-- **TypeScript Support**: Full type safety and IntelliSense
-- **Extensible Architecture**: Easy to add new data sources and query types
+## 1.0.0
 
-### Core Components
-- `MunicipalQueryService`: Main query engine
-- `EligendoClient`: HTTP client for API communications
-- `MunicipalDataParser`: Data processing and validation
-- `FileManager`: File operations and data persistence
-- `Logger`: Comprehensive logging system
-
-### Scripts & Tools
-- `demo-query.ps1`: Interactive PowerShell query tool
-- `run-municipal-demo.ps1`: Complete demo with sample data
-- `simple-query.js`: Lightweight JavaScript interface
-- Multiple TypeScript demo files
-
-### Documentation
-- Complete API reference
-- Getting started guide
-- Contributing guidelines
-- Query examples and results
-- Working documentation
-
-## [Unreleased]
-
-### Planned
-- 🌐 Real Eligendo API integration
-- 🔄 Data synchronization and caching
-- 📊 Advanced analytics and reporting
-- 🗺️ Geographic visualization features
-- 📱 Web interface for data exploration
-- 🔒 Authentication and rate limiting
-- 📦 npm package publication
-- 🐳 Docker containerization
-
-### Future Enhancements
-- Support for regional and national election data
-- Historical election data comparison
-- Export functionality (CSV, Excel, PDF)
-- Real-time election result streaming
-- Multi-language support
-- REST API server mode
-- Integration with Italian government data sources
+- Published the original TypeScript demonstration and municipality-query tools.
+- Preserved this release in Git history under the `v1.0.0` tag.
