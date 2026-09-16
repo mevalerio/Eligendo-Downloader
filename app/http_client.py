@@ -11,6 +11,8 @@ import httpx
 ALLOWED_HOSTS = {
     "elezionistorico.interno.gov.it",
     "dait.interno.gov.it",
+    "www.gazzettaufficiale.it",
+    "www.normattiva.it",
 }
 REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 
@@ -38,8 +40,8 @@ def validate_url(url: str) -> str:
         raise UnsafeUrlError("The URL must not contain credentials.")
     if parsed.hostname not in ALLOWED_HOSTS:
         raise UnsafeUrlError(
-            "Host not allowed. Use only the official "
-            "elezionistorico.interno.gov.it or dait.interno.gov.it domains."
+            "Host not allowed. Use only the configured official Ministry, "
+            "Gazzetta Ufficiale, or Normattiva domains."
         )
     if parsed.port not in (None, 443):
         raise UnsafeUrlError("Port not allowed.")
@@ -75,7 +77,8 @@ class SafeHttpClient:
 
     def get(self, url: str, *, max_bytes: int | None = None) -> Download:
         current_url = validate_url(url)
-        for _ in range(6):
+        connection_attempts = 0
+        for _ in range(12):
             self._wait_for_slot()
             try:
                 with self._client.stream("GET", current_url) as response:
@@ -115,5 +118,9 @@ class SafeHttpClient:
                         content_type=response.headers.get("content-type"),
                     )
             except httpx.HTTPError as exc:
+                connection_attempts += 1
+                if connection_attempts < 3:
+                    time.sleep(max(self.interval, 0.5) * connection_attempts)
+                    continue
                 raise UpstreamError(f"Error connecting to {current_url}: {exc}") from exc
         raise UpstreamError("The portal response contains too many redirects.")

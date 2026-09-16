@@ -19,12 +19,16 @@ from .schemas import (
     ArchiveRowsResponse,
     CatalogueEntry,
     ElectionResultsResponse,
+    ElectoralLawDownloadRequest,
+    ElectoralLawDownloadResult,
+    ElectoralLawEntry,
     HistoryImportRequest,
     HistoryImportResult,
     MunicipalYearImportRequest,
     MunicipalYearImportResult,
     MunicipalitiesResponse,
     MunicipalityCoverageResponse,
+    MunicipalityAuditResponse,
     PageRequest,
     PageResult,
     PartyResultsResponse,
@@ -328,6 +332,64 @@ def municipality_history_coverage(
         not_available_at_municipality_level=counts[
             "not_available_at_municipality_level"
         ],
+        rows=rows,
+    )
+
+
+@app.get(
+    "/api/v1/legal/electoral-laws",
+    response_model=list[ElectoralLawEntry],
+    tags=["legal"],
+)
+def electoral_law_catalogue() -> list[dict[str, object]]:
+    """List the official electoral laws and college-boundary decrees."""
+    return service.electoral_laws()
+
+
+@app.post(
+    "/api/v1/legal/electoral-laws/download",
+    response_model=ElectoralLawDownloadResult,
+    tags=["legal"],
+)
+def download_electoral_laws(
+    request: ElectoralLawDownloadRequest,
+) -> dict[str, object]:
+    """Download and hash the selected official legal sources."""
+    return service.download_electoral_laws(
+        ids=request.ids,
+        overwrite=request.overwrite,
+    )
+
+
+@app.get(
+    "/api/v1/history/audit/municipality",
+    response_model=MunicipalityAuditResponse,
+    tags=["history"],
+)
+def audit_municipality_history(
+    comune: str,
+    category: str | None = None,
+) -> MunicipalityAuditResponse:
+    """Sense-check reconstructed national-election municipality totals."""
+    if category not in (None, "camera", "senato"):
+        raise ValueError("category must be 'camera' or 'senato'.")
+    categories = (category,) if category else ("camera", "senato")
+    rows = database.municipality_election_audit(
+        municipality=comune,
+        categories=categories,
+    )
+    counts = {
+        status: sum(row["stato"] == status for row in rows)
+        for status in ("pass", "warning", "invalid", "insufficient_data")
+    }
+    return MunicipalityAuditResponse(
+        comune=comune,
+        categories=list(categories),
+        elections_checked=len(rows),
+        passed=counts["pass"],
+        warnings=counts["warning"],
+        invalid=counts["invalid"],
+        insufficient_data=counts["insufficient_data"],
         rows=rows,
     )
 

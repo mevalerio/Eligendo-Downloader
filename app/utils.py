@@ -15,17 +15,65 @@ def slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", ascii_value.casefold()).strip("_")
 
 
+HISTORICALLY_SPLIT_MUNICIPALITIES = (
+    "REGGIO CALABRIA",
+    "BRESCIA",
+    "BOLOGNA",
+    "CAGLIARI",
+    "CATANIA",
+    "FERRARA",
+    "FIRENZE",
+    "FOGGIA",
+    "GENOVA",
+    "LIVORNO",
+    "MESSINA",
+    "MILANO",
+    "MODENA",
+    "NAPOLI",
+    "PALERMO",
+    "PADOVA",
+    "PARMA",
+    "PERUGIA",
+    "PRATO",
+    "RAVENNA",
+    "RIMINI",
+    "SALERNO",
+    "TARANTO",
+    "TORINO",
+    "TRIESTE",
+    "VENEZIA",
+    "BARI",
+    "ROMA",
+)
+
+
 def canonical_municipality(value: str | None) -> str | None:
     cleaned = clean_text(value)
     if not cleaned:
         return None
     folded = cleaned.casefold()
-    if (
-        folded.startswith("roma - ")
-        or folded == "roma centro"
-        or folded.startswith("roma zona ")
-    ):
-        return "ROMA"
+    explicit_part = re.fullmatch(
+        r"parte\s+(?:di|del)\s+comune(?:\s+di)?\s+(.+)",
+        folded,
+    )
+    if explicit_part:
+        municipality = clean_text(explicit_part.group(1)).upper()
+        if municipality == "REGGIO DI CALABRIA":
+            return "REGGIO CALABRIA"
+        return municipality
+    for municipality in HISTORICALLY_SPLIT_MUNICIPALITIES:
+        base = municipality.casefold()
+        if (
+            folded.startswith(f"{base} - ")
+            or folded.startswith(f"{base} centro")
+            or folded.startswith(f"{base} nord")
+            or folded.startswith(f"{base} sud")
+            or folded.startswith(f"{base} est")
+            or folded.startswith(f"{base} ovest")
+            or folded.startswith(f"{base} zona ")
+            or re.fullmatch(rf"{re.escape(base)}\s+\d+", folded)
+        ):
+            return municipality
     return cleaned
 
 

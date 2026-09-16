@@ -25,6 +25,8 @@ Official Open Data catalogue
                             JSON and CSV API endpoints
 
 Exact archive page -> HTML parser -> optional SQLite snapshot
+
+Official legal catalogue -> article/PDF downloader -> hashed local corpus
 ```
 
 ## Components
@@ -37,7 +39,10 @@ Exact archive page -> HTML parser -> optional SQLite snapshot
   files exist, and derives municipal party-result records.
 - `app/history.py` maps heterogeneous result, geography, electorate, turnout,
   ballot, and referendum fields to the unified historical result model. It can
-  aggregate section-only local archives to municipalities.
+  aggregate section-only local archives to municipalities and canonicalises
+  historical college-part labels.
+- `app/electoral_laws.py` records the applicable national electoral laws and
+  official college-boundary instruments by election regime.
 - `app/scraper.py` parses election metadata, geography, summaries,
   candidates, lists, totals, votes, percentages, and seats from HTML pages.
 - `app/database.py` owns the SQLite schema, transactional replacement, and
@@ -69,9 +74,10 @@ the raw payload. This design permits future alias additions without discarding
 source information.
 
 The unified table uses one row per published result subject: list, candidate,
-or referendum option. Where a source exposes Rome through historical electoral
-subdivisions, the municipality is canonicalised to `ROMA` and the original
-subdivision is retained as the college. Section-only archives are grouped by
+or referendum option. Where a source exposes a municipality through named
+districts or an explicit `Parte di Comune` label, the municipality is
+canonicalised and the original subdivision is retained as the college.
+Section-only archives are grouped by
 municipality and result subject before insertion; their provenance uses a
 `#municipality-aggregate` source marker.
 
@@ -88,8 +94,9 @@ the repeated list values that may accompany run-off records.
 ## Trust boundaries
 
 External content is treated as untrusted. Network requests are restricted to
-the two configured Ministry hosts, redirect targets are revalidated, compressed
-and extracted size limits are applied, and archive paths are checked before
+configured Ministry and official legal-publication hosts. Redirect targets are
+revalidated, compressed and extracted size limits are applied, and archive
+paths are checked before
 reading members. The service should still be deployed with ordinary operating
 system and network isolation when exposed beyond a research workstation.
 

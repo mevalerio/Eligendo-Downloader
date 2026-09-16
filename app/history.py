@@ -255,7 +255,17 @@ def _context(row: ArchiveRow, *, category: str) -> dict[str, Any]:
         "country": _first(row.payload, ("nazione", "paese", "naz")),
         "college": _first(
             row.payload,
-            ("collegio", "colluninom", "collpluri", "collplurinom"),
+            (
+                "collegio",
+                "coll",
+                "collegiouninominale",
+                "collegio_uninominale",
+                "colluninom",
+                "collegioplurinominale",
+                "collegio_plurinominale",
+                "collpluri",
+                "collplurinom",
+            ),
         ),
         "question_number": question_number,
         "question": _first(

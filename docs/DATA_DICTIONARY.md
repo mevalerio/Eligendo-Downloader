@@ -110,3 +110,32 @@ concordance with at least:
 
 Keeping this crosswalk separate preserves the distinction between published
 data and analytical decisions.
+
+## Split-municipality audit
+
+`/api/v1/history/audit/municipality` returns one selected aggregation layer per
+Chamber or Senate election.
+
+| JSON field | Type | Definition |
+|---|---|---|
+| `tipo_elezione` | text | `camera` or `senato` |
+| `data` | ISO date | Election date |
+| `comune` | text | Requested canonical municipality |
+| `fonte_file` | text | Source member selected for the check |
+| `tipo_risultato` | text | Result layer used for vote totals |
+| `parti_rilevate` | integer | Distinct college or constituency fragments reconstructed |
+| `aventi_diritto` | integer or null | Electors summed once per fragment |
+| `votanti` | integer or null | Voters summed once per fragment |
+| `voti_risultato` | integer | Result votes summed across subjects and fragments |
+| `rapporto_voti_aventi_diritto` | number or null | Result votes divided by electors |
+| `data_riferimento` | ISO date or null | Nearest same-category election with electorate data |
+| `aventi_diritto_riferimento` | integer or null | Electors in the reference election |
+| `rapporto_aventi_diritto_riferimento` | number or null | Current electors divided by reference electors |
+| `fonte_confini_id` | text or null | Applicable item in the electoral-law catalogue |
+| `stato` | text | `pass`, `warning`, `invalid`, or `insufficient_data` |
+
+`invalid` indicates an arithmetic contradiction such as votes exceeding
+voters or electors. `warning` identifies an unusually large electorate change
+or vote/elector ratio. `insufficient_data` means the source does not publish
+the required electorate fields. The check preserves rather than silently
+rewrites anomalous official records.

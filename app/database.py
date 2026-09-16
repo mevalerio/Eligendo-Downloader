@@ -8,9 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from .archive import ArchiveRow
+from .electoral_laws import boundary_source
 from .history import normalise_history_results
 from .schemas import CatalogueEntry, PageResult
-from .utils import slug
+from .utils import canonical_municipality, slug
 
 
 SCHEMA = """
@@ -642,6 +643,185 @@ class Database:
                 }
             )
         return coverage
+
+    def municipality_election_audit(
+        self,
+        *,
+        municipality: str,
+        categories: tuple[str, ...] = ("camera", "senato"),
+    ) -> list[dict[str, Any]]:
+        municipality_key = slug(municipality)
+        placeholders = ",".join("?" for _ in categories)
+        legacy_keys = (
+            f"parte_di_comune_{municipality_key}",
+            f"parte_di_comune_di_{municipality_key}",
+            f"parte_del_comune_di_{municipality_key}",
+        )
+        if municipality_key == "reggio_calabria":
+            legacy_keys = (
+                *legacy_keys,
+                "parte_di_comune_reggio_di_calabria",
+                "parte_del_comune_di_reggio_di_calabria",
+            )
+        legacy_placeholders = ",".join("?" for _ in legacy_keys)
+        with closing(self.connect()) as connection:
+            units = connection.execute(
+                f"""
+                SELECT e.catalogue_id, e.category, e.election_date,
+                       e.source_file, e.result_type, e.round,
+                       e.municipality,
+                       COALESCE(e.college, '') AS college,
+                       COALESCE(e.constituency, '') AS constituency,
+                       MAX(e.electors) AS electors,
+                       MAX(e.voters) AS voters,
+                       SUM(e.votes) AS result_votes
+                FROM election_results e
+                WHERE (
+                    e.municipality_key = ?
+                    OR e.municipality_key LIKE ?
+                    OR e.municipality_key IN ({legacy_placeholders})
+                )
+                  AND e.category IN ({placeholders})
+                GROUP BY e.catalogue_id, e.category, e.election_date,
+                         e.source_file, e.result_type, e.round,
+                         e.municipality,
+                         COALESCE(e.college, ''),
+                         COALESCE(e.constituency, '')
+                ORDER BY e.election_date, e.category, e.source_file,
+                         e.result_type, college
+                """,
+                (
+                    municipality_key,
+                    f"{municipality_key}_%",
+                    *legacy_keys,
+                    *categories,
+                ),
+            ).fetchall()
+
+        layers: dict[tuple[Any, ...], dict[str, Any]] = {}
+        for unit in units:
+            canonical = canonical_municipality(unit["municipality"])
+            if slug(canonical or "") != municipality_key:
+                continue
+            key = (
+                unit["catalogue_id"],
+                unit["category"],
+                unit["election_date"],
+                unit["source_file"],
+                unit["result_type"],
+                unit["round"],
+            )
+            layer = layers.setdefault(
+                key,
+                {
+                    "tipo_elezione": unit["category"],
+                    "data": unit["election_date"],
+                    "comune": municipality,
+                    "fonte_file": unit["source_file"],
+                    "tipo_risultato": unit["result_type"],
+                    "parti_rilevate": 0,
+                    "aventi_diritto": 0,
+                    "votanti": 0,
+                    "voti_risultato": 0,
+                    "_complete_electors": True,
+                    "_complete_voters": True,
+                },
+            )
+            layer["parti_rilevate"] += 1
+            if unit["electors"] is None:
+                layer["_complete_electors"] = False
+            else:
+                layer["aventi_diritto"] += int(unit["electors"])
+            if unit["voters"] is None:
+                layer["_complete_voters"] = False
+            else:
+                layer["votanti"] += int(unit["voters"])
+            layer["voti_risultato"] += int(unit["result_votes"] or 0)
+
+        by_election: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for layer in layers.values():
+            if not layer.pop("_complete_electors"):
+                layer["aventi_diritto"] = None
+            if not layer.pop("_complete_voters"):
+                layer["votanti"] = None
+            by_election.setdefault(
+                (layer["tipo_elezione"], layer["data"]), []
+            ).append(layer)
+
+        selected: list[dict[str, Any]] = []
+        for candidates in by_election.values():
+            selected.append(
+                max(
+                    candidates,
+                    key=lambda row: (
+                        row["aventi_diritto"] is not None,
+                        row["tipo_risultato"] == "list",
+                        row["votanti"] is not None,
+                        row["voti_risultato"],
+                    ),
+                )
+            )
+
+        dated = [(date.fromisoformat(row["data"]), row) for row in selected]
+        for current_date, row in dated:
+            electors = row["aventi_diritto"]
+            voters = row["votanti"]
+            votes = row["voti_risultato"]
+            vote_ratio = (
+                round(votes / electors, 6) if electors not in (None, 0) else None
+            )
+            references = [
+                (other_date, other)
+                for other_date, other in dated
+                if other is not row
+                and other["tipo_elezione"] == row["tipo_elezione"]
+                and other["aventi_diritto"] not in (None, 0)
+            ]
+            reference_date = None
+            reference_electors = None
+            reference_ratio = None
+            if references:
+                reference_date, reference = min(
+                    references,
+                    key=lambda item: abs((item[0] - current_date).days),
+                )
+                reference_electors = int(reference["aventi_diritto"])
+                if electors is not None:
+                    reference_ratio = round(electors / reference_electors, 6)
+
+            if electors in (None, 0) or reference_electors is None:
+                status = "insufficient_data"
+            elif (
+                votes > electors * 1.02
+                or (voters is not None and voters > electors * 1.01)
+                or (voters is not None and votes > voters * 1.02)
+            ):
+                status = "invalid"
+            elif (
+                vote_ratio is None
+                or not 0.2 <= vote_ratio <= 1.02
+                or reference_ratio is None
+                or not 0.65 <= reference_ratio <= 1.35
+            ):
+                status = "warning"
+            else:
+                status = "pass"
+
+            row.update(
+                {
+                    "rapporto_voti_aventi_diritto": vote_ratio,
+                    "data_riferimento": (
+                        reference_date.isoformat() if reference_date else None
+                    ),
+                    "aventi_diritto_riferimento": reference_electors,
+                    "rapporto_aventi_diritto_riferimento": reference_ratio,
+                    "fonte_confini_id": boundary_source(
+                        row["tipo_elezione"], current_date.year
+                    ),
+                    "stato": status,
+                }
+            )
+        return sorted(selected, key=lambda row: (row["data"], row["tipo_elezione"]))
 
     @staticmethod
     def _party_filters(

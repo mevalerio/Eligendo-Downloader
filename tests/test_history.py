@@ -147,6 +147,47 @@ def test_history_normaliser_accepts_italian_decimal_integers() -> None:
     assert results[0].voters == 1500
 
 
+def test_history_normaliser_preserves_full_college_field_names() -> None:
+    results = normalise_history_results(
+        [
+            source_row(
+                {
+                    "collegioplurinominale": "LAZIO 1 - 01",
+                    "collegiouninominale": "01 - ROMA - TRIONFALE",
+                    "lista": "LISTA A",
+                    "voti_lista": "60",
+                    "elettori": "100",
+                    "votanti": "80",
+                }
+            )
+        ],
+        category="camera",
+        election_date=date(2018, 3, 4),
+    )
+
+    assert results[0].college == "01 - ROMA - TRIONFALE"
+
+
+def test_history_normaliser_preserves_short_college_field() -> None:
+    results = normalise_history_results(
+        [
+            source_row(
+                {
+                    "coll": "Brescia - Flero",
+                    "lista": "LISTA A",
+                    "voti_lista": "60",
+                    "elettori": "100",
+                    "votanti": "80",
+                }
+            )
+        ],
+        category="camera",
+        election_date=date(2001, 5, 13),
+    )
+
+    assert results[0].college == "Brescia - Flero"
+
+
 def test_history_normaliser_accepts_2024_european_columns() -> None:
     row = source_row(
         {
@@ -313,3 +354,172 @@ def test_history_api_and_rome_lazio_coverage(tmp_path, monkeypatch) -> None:
     assert coverage["present"] == 1
     assert coverage["missing"] == 1
     assert coverage["not_available_at_municipality_level"] == 1
+
+
+def test_municipality_audit_reconstructs_split_colleges(
+    tmp_path, monkeypatch
+) -> None:
+    database = Database(tmp_path / "audit.sqlite3")
+    database.replace_archive(
+        entry("camera", date(1992, 4, 5), "camera-19920405.zip"),
+        sha256="reference",
+        rows=[
+            source_row(
+                {
+                    "lista": "LISTA A",
+                    "voti_lista": "500",
+                    "elettori": "1000",
+                    "votanti": "800",
+                }
+            )
+        ],
+    )
+    database.replace_archive(
+        entry("camera", date(1994, 3, 27), "camera-19940327.zip"),
+        sha256="split",
+        rows=[
+            source_row(
+                {
+                    "collegio": college,
+                    "lista": "LISTA A",
+                    "voti_lista": "250",
+                    "elettori": "500",
+                    "votanti": "400",
+                },
+                file_name="camera_proporzionale.txt",
+                row_number=row_number,
+            )
+            for college, row_number in (("ROMA 1", 2), ("ROMA 2", 3))
+        ],
+    )
+
+    rows = database.municipality_election_audit(
+        municipality="ROMA",
+        categories=("camera",),
+    )
+
+    assert len(rows) == 2
+    split = next(row for row in rows if row["data"] == "1994-03-27")
+    assert split["parti_rilevate"] == 2
+    assert split["aventi_diritto"] == 1000
+    assert split["voti_risultato"] == 500
+    assert split["data_riferimento"] == "1992-04-05"
+    assert split["rapporto_aventi_diritto_riferimento"] == 1.0
+    assert split["fonte_confini_id"] == "camera-boundaries-1993-536"
+    assert split["stato"] == "pass"
+
+    monkeypatch.setattr(main, "database", database)
+    response = TestClient(main.app).get(
+        "/api/v1/history/audit/municipality",
+        params={"comune": "ROMA", "category": "camera"},
+    )
+    assert response.status_code == 200
+    assert response.json()["elections_checked"] == 2
+    assert response.json()["passed"] == 2
+
+
+def test_municipality_audit_uses_nearest_complete_split_election(tmp_path) -> None:
+    database = Database(tmp_path / "nearest.sqlite3")
+    for election_date, electors in (
+        (date(1992, 4, 5), 800),
+        (date(1994, 3, 27), 1000),
+        (date(1996, 4, 21), 1020),
+    ):
+        database.replace_archive(
+            entry("camera", election_date, f"camera-{election_date:%Y%m%d}.zip"),
+            sha256=str(election_date),
+            rows=[
+                source_row(
+                    {
+                        "collegio": college,
+                        "lista": "LISTA A",
+                        "voti_lista": str(electors // 4),
+                        "elettori": str(electors // 2),
+                        "votanti": str(electors // 3),
+                    },
+                    row_number=row_number,
+                )
+                for row_number, college in enumerate(("ROMA 1", "ROMA 2"), start=2)
+            ],
+        )
+
+    rows = database.municipality_election_audit(
+        municipality="ROMA",
+        categories=("camera",),
+    )
+    current = next(row for row in rows if row["data"] == "1996-04-21")
+    assert current["data_riferimento"] == "1994-03-27"
+    assert current["aventi_diritto_riferimento"] == 1000
+    assert current["rapporto_aventi_diritto_riferimento"] == 1.02
+
+
+def test_municipality_audit_reads_legacy_fragments_without_mutating_them(tmp_path) -> None:
+    database = Database(tmp_path / "legacy.sqlite3")
+    database.replace_archive(
+        entry("senato", date(2001, 5, 13), "senato-20010513.zip"),
+        sha256="legacy",
+        rows=[
+            source_row(
+                {
+                    "collegio": "Firenze Nord",
+                    "lista": "LISTA A",
+                    "voti_lista": "60",
+                    "elettori": "100",
+                    "votanti": "80",
+                },
+                municipality="Firenze Nord",
+            )
+        ],
+    )
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE election_results SET municipality='Firenze Nord', "
+            "municipality_key='firenze_nord'"
+        )
+        connection.commit()
+
+    rows = database.municipality_election_audit(
+        municipality="FIRENZE",
+        categories=("senato",),
+    )
+
+    assert len(rows) == 1
+    with database.connect() as connection:
+        stored = connection.execute(
+            "SELECT municipality FROM election_results"
+        ).fetchone()["municipality"]
+    assert stored == "Firenze Nord"
+
+
+def test_municipality_audit_reads_legacy_reggio_di_calabria_label(tmp_path) -> None:
+    database = Database(tmp_path / "reggio.sqlite3")
+    database.replace_archive(
+        entry("camera", date(2001, 5, 13), "camera-20010513.zip"),
+        sha256="reggio",
+        rows=[
+            source_row(
+                {
+                    "coll": "Reggio Calabria - Sud",
+                    "lista": "LISTA A",
+                    "voti_lista": "60",
+                    "elettori": "100",
+                    "votanti": "80",
+                },
+                municipality="Parte di Comune REGGIO DI CALABRIA",
+            )
+        ],
+    )
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE election_results SET municipality="
+            "'Parte di Comune REGGIO DI CALABRIA', "
+            "municipality_key='parte_di_comune_reggio_di_calabria'"
+        )
+        connection.commit()
+
+    rows = database.municipality_election_audit(
+        municipality="REGGIO CALABRIA",
+        categories=("camera",),
+    )
+
+    assert len(rows) == 1
