@@ -46,7 +46,8 @@ Official legal catalogue -> article/PDF downloader -> hashed local corpus
 - `app/scraper.py` parses election metadata, geography, summaries,
   candidates, lists, totals, votes, percentages, and seats from HTML pages.
 - `app/database.py` owns the SQLite schema, transactional replacement, and
-  filtered queries.
+  filtered queries, including the grouped national-election geography
+  coverage table used to expose municipality and college splits.
 - `app/service.py` coordinates catalogue caching, downloads, parsing, hashes,
   and database writes.
 - `app/main.py` exposes the FastAPI application, JSON endpoints, and streaming
@@ -90,6 +91,12 @@ DATA, COMUNE, PARTITO, VOTI
 It does not harmonise party identities across elections. By default, queries
 select round one together with records whose source provides no round, avoiding
 the repeated list values that may accompany run-off records.
+
+The national geography coverage projection groups normalised result rows by
+election, geography, college, round, and question, and collapses duplicate
+source members into one row with a source-file list and count. It keeps
+region-level and nation-level records when municipality data are absent, so a
+coverage check does not mistake a broader source table for a missing town.
 
 ## Trust boundaries
 

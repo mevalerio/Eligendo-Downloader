@@ -101,6 +101,23 @@ GET /api/v1/history/results.csv?category=camera&year=2022&comune=ROMA
 votes are separate option rows. The complete column definition is in the
 [data dictionary](docs/DATA_DICTIONARY.md).
 
+### Sense-check election geography
+
+```text
+GET /api/v1/history/coverage/national?category=camera&year=1994
+GET /api/v1/history/coverage/national.csv?comune=ROMA
+```
+
+These endpoints list the geographic units represented in each imported
+national election (`assemblea_costituente`, `camera`, `senato`, `europee`, and
+`referendum`). A row is an election, geography, college, round, and question;
+multiple source members are collapsed and listed in the provenance fields. It preserves region, province, municipality,
+constituency, country, electorate, voters, valid votes, row and subject
+counts, and archive provenance. This makes municipality splits visible while
+retaining broader region- or nation-level records where the source does not
+publish municipality data. JSON is paginated; the CSV streams all matches and
+uses semicolons.
+
 ### Check Rome across elections involving Lazio
 
 ```text
@@ -308,6 +325,8 @@ linking them to their candidate.
 | `POST` | `/api/v1/history/import` | Resumably import all selected election categories |
 | `GET` | `/api/v1/history/results` | Query unified all-election results as JSON |
 | `GET` | `/api/v1/history/results.csv` | Stream the complete or filtered history as CSV |
+| `GET` | `/api/v1/history/coverage/national` | List regions, municipalities, and colleges by national election |
+| `GET` | `/api/v1/history/coverage/national.csv` | Stream the national geography table as CSV |
 | `GET` | `/api/v1/history/coverage/municipality` | Audit a municipality across relevant elections |
 | `GET` | `/api/v1/history/audit/municipality` | Reconstruct and sense-check a split municipality |
 | `GET` | `/api/v1/legal/electoral-laws` | List official electoral laws and boundary instruments |

@@ -29,6 +29,7 @@ from .schemas import (
     MunicipalitiesResponse,
     MunicipalityCoverageResponse,
     MunicipalityAuditResponse,
+    NationalGeographyResponse,
     PageRequest,
     PageResult,
     PartyResultsResponse,
@@ -299,6 +300,115 @@ def historical_results_csv(
         headers={
             "Content-Disposition": (
                 f'attachment; filename="all_election_results_{label}.csv"'
+            )
+        },
+    )
+
+
+NATIONAL_GEOGRAPHY_CSV_FIELDS = [
+    "TIPO_ELEZIONE",
+    "DATA",
+    "LIVELLO",
+    "REGIONE",
+    "CIRCOSCRIZIONE",
+    "PROVINCIA",
+    "COMUNE",
+    "NAZIONE",
+    "COLLEGIO",
+    "TURNO",
+    "NUMERO_QUESITO",
+    "RIGHE",
+    "SOGGETTI",
+    "ELETTORI",
+    "VOTANTI",
+    "VOTI_VALIDI",
+    "FONTE_FILE",
+    "FONTE_FILE_COUNT",
+    "FONTE_URL",
+    "SHA256",
+]
+
+
+@app.get(
+    "/api/v1/history/coverage/national",
+    response_model=NationalGeographyResponse,
+    tags=["history"],
+)
+def national_history_geography(
+    category: str | None = None,
+    year: Annotated[int | None, Query(ge=1946, le=2100)] = None,
+    election_date: date | None = None,
+    regione: str | None = None,
+    provincia: str | None = None,
+    comune: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=5000)] = 1000,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> NationalGeographyResponse:
+    """List the geographic units present in each imported national election."""
+    count, rows = database.query_national_geography(
+        category=category,
+        year=year,
+        election_date=election_date,
+        region=regione,
+        province=provincia,
+        municipality=comune,
+        limit=limit,
+        offset=offset,
+    )
+    return NationalGeographyResponse(count=count, limit=limit, offset=offset, rows=rows)
+
+
+@app.get("/api/v1/history/coverage/national.csv", tags=["history"])
+def national_history_geography_csv(
+    category: str | None = None,
+    year: Annotated[int | None, Query(ge=1946, le=2100)] = None,
+    election_date: date | None = None,
+    regione: str | None = None,
+    provincia: str | None = None,
+    comune: str | None = None,
+) -> StreamingResponse:
+    """Stream the national-election geography table as semicolon-delimited CSV."""
+
+    def generate_csv():
+        buffer = io.StringIO()
+        writer = csv.DictWriter(
+            buffer,
+            fieldnames=NATIONAL_GEOGRAPHY_CSV_FIELDS,
+            delimiter=";",
+            lineterminator="\n",
+        )
+        buffer.write("\ufeff")
+        writer.writeheader()
+        yield buffer.getvalue()
+        buffer.seek(0)
+        buffer.truncate(0)
+        for row in database.iter_national_geography(
+            category=category,
+            year=year,
+            election_date=election_date,
+            region=regione,
+            province=provincia,
+            municipality=comune,
+        ):
+            writer.writerow(
+                {
+                    field: row[
+                        "file_count" if field == "FONTE_FILE_COUNT" else field.casefold()
+                    ]
+                    for field in NATIONAL_GEOGRAPHY_CSV_FIELDS
+                }
+            )
+            yield buffer.getvalue()
+            buffer.seek(0)
+            buffer.truncate(0)
+
+    label = str(year) if year is not None else "all"
+    return StreamingResponse(
+        generate_csv(),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="national_geography_{label}.csv"'
             )
         },
     )

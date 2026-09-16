@@ -14,6 +14,15 @@ from .schemas import CatalogueEntry, PageResult
 from .utils import canonical_municipality, slug
 
 
+NATIONAL_ELECTION_CATEGORIES = (
+    "assemblea_costituente",
+    "camera",
+    "senato",
+    "europee",
+    "referendum",
+)
+
+
 SCHEMA = """
 PRAGMA foreign_keys = ON;
 PRAGMA journal_mode = WAL;
@@ -565,6 +574,187 @@ class Database:
             )
             for record in cursor:
                 yield self._history_row(record)
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _national_coverage_filters(
+        *,
+        category: str | None,
+        year: int | None,
+        election_date: date | None,
+        region: str | None,
+        province: str | None,
+        municipality: str | None,
+    ) -> tuple[str, list[Any]]:
+        if category is not None and category not in NATIONAL_ELECTION_CATEGORIES:
+            raise ValueError(
+                "category must be one of: "
+                + ", ".join(NATIONAL_ELECTION_CATEGORIES)
+            )
+        placeholders = ",".join("?" for _ in NATIONAL_ELECTION_CATEGORIES)
+        clauses = [f"e.category IN ({placeholders})"]
+        parameters: list[Any] = list(NATIONAL_ELECTION_CATEGORIES)
+        if category:
+            clauses.append("e.category = ?")
+            parameters.append(category)
+        if year is not None:
+            clauses.append("substr(e.election_date, 1, 4) = ?")
+            parameters.append(str(year))
+        if election_date is not None:
+            clauses.append("e.election_date = ?")
+            parameters.append(election_date.isoformat())
+        if region:
+            clauses.append("e.region = ? COLLATE NOCASE")
+            parameters.append(region)
+        if province:
+            clauses.append("e.province = ? COLLATE NOCASE")
+            parameters.append(province)
+        if municipality:
+            clauses.append("e.municipality_key = ?")
+            parameters.append(slug(municipality))
+        return " AND ".join(clauses), parameters
+
+    @staticmethod
+    def _national_coverage_row(record: sqlite3.Row) -> dict[str, Any]:
+        if record["municipality"]:
+            level = "comune"
+        elif record["province"]:
+            level = "provincia"
+        elif record["region"]:
+            level = "regione"
+        elif record["country"]:
+            level = "nazione"
+        else:
+            level = "nazionale"
+        return {
+            "tipo_elezione": record["category"],
+            "data": record["election_date"],
+            "livello": level,
+            "regione": record["region"],
+            "circoscrizione": record["constituency"],
+            "provincia": record["province"],
+            "comune": record["municipality"],
+            "nazione": record["country"],
+            "collegio": record["college"],
+            "turno": record["round"],
+            "numero_quesito": record["question_number"],
+            "righe": int(record["rows"]),
+            "soggetti": int(record["subjects"]),
+            "elettori": record["electors"],
+            "votanti": record["voters"],
+            "voti_validi": record["valid_votes"],
+            "fonte_file": record["source_file"],
+            "file_count": int(record["source_files"]),
+            "fonte_url": record["download_url"],
+            "sha256": record["sha256"],
+        }
+
+    def query_national_geography(
+        self,
+        *,
+        category: str | None,
+        year: int | None,
+        election_date: date | None,
+        region: str | None,
+        province: str | None,
+        municipality: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[int, list[dict[str, Any]]]:
+        where, parameters = self._national_coverage_filters(
+            category=category,
+            year=year,
+            election_date=election_date,
+            region=region,
+            province=province,
+            municipality=municipality,
+        )
+        grouped = f"""
+            SELECT e.catalogue_id, e.category, e.election_date,
+                   e.region, e.constituency, e.province, e.municipality,
+                   e.country, e.college, e.round, e.question_number,
+                   GROUP_CONCAT(DISTINCT e.source_file) AS source_file,
+                   COUNT(DISTINCT e.source_file) AS source_files,
+                   COUNT(*) AS rows,
+                   COUNT(DISTINCT e.subject_key) AS subjects,
+                   MAX(e.electors) AS electors,
+                   MAX(e.voters) AS voters,
+                   MAX(e.valid_votes) AS valid_votes,
+                   c.download_url, c.sha256
+            FROM election_results e
+            JOIN catalogues c ON c.id = e.catalogue_id
+            WHERE {where}
+            GROUP BY e.catalogue_id, e.category, e.election_date,
+                     e.region, e.constituency, e.province, e.municipality,
+                     e.country, e.college, e.round, e.question_number,
+                     c.download_url, c.sha256
+        """
+        order = """
+            ORDER BY election_date, category, region, province, municipality,
+                     constituency, college, source_file, round, question_number
+        """
+        with closing(self.connect()) as connection:
+            count = int(
+                connection.execute(
+                    f"SELECT COUNT(*) AS n FROM ({grouped}) geography",
+                    parameters,
+                ).fetchone()["n"]
+            )
+            selected = connection.execute(
+                f"SELECT * FROM ({grouped}) geography {order} LIMIT ? OFFSET ?",
+                [*parameters, limit, offset],
+            ).fetchall()
+        return count, [self._national_coverage_row(record) for record in selected]
+
+    def iter_national_geography(
+        self,
+        *,
+        category: str | None,
+        year: int | None,
+        election_date: date | None,
+        region: str | None,
+        province: str | None,
+        municipality: str | None,
+    ):
+        where, parameters = self._national_coverage_filters(
+            category=category,
+            year=year,
+            election_date=election_date,
+            region=region,
+            province=province,
+            municipality=municipality,
+        )
+        connection = self.connect()
+        try:
+            cursor = connection.execute(
+                f"""
+                SELECT e.catalogue_id, e.category, e.election_date,
+                       e.region, e.constituency, e.province, e.municipality,
+                       e.country, e.college, e.round, e.question_number,
+                       GROUP_CONCAT(DISTINCT e.source_file) AS source_file,
+                       COUNT(DISTINCT e.source_file) AS source_files,
+                       COUNT(*) AS rows,
+                       COUNT(DISTINCT e.subject_key) AS subjects,
+                       MAX(e.electors) AS electors,
+                       MAX(e.voters) AS voters,
+                       MAX(e.valid_votes) AS valid_votes,
+                       c.download_url, c.sha256
+                FROM election_results e
+                JOIN catalogues c ON c.id = e.catalogue_id
+                WHERE {where}
+                GROUP BY e.catalogue_id, e.category, e.election_date,
+                         e.region, e.constituency, e.province, e.municipality,
+                         e.country, e.college, e.round, e.question_number,
+                         c.download_url, c.sha256
+                ORDER BY e.election_date, e.category, e.region, e.province,
+                         e.municipality, e.constituency, e.college,
+                         e.source_file, e.round, e.question_number
+                """,
+                parameters,
+            )
+            for record in cursor:
+                yield self._national_coverage_row(record)
         finally:
             connection.close()
 
