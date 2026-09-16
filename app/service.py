@@ -9,10 +9,12 @@ from .archive import parse_zip_archive
 from .catalogue import CATALOGUE_URL, catalogue_matches, parse_catalogue_html
 from .config import Settings
 from .database import Database
+from .history import ELECTION_CATEGORIES
 from .http_client import SafeHttpClient
 from .schemas import (
     ArchiveImportResult,
     CatalogueEntry,
+    HistoryImportResult,
     MunicipalYearImportResult,
     PageResult,
 )
@@ -80,7 +82,12 @@ class EligendoService:
             )
         return self._import_entry(candidates[0])
 
-    def _import_entry(self, entry: CatalogueEntry) -> ArchiveImportResult:
+    def _import_entry(
+        self,
+        entry: CatalogueEntry,
+        *,
+        municipality_level_only: bool = False,
+    ) -> ArchiveImportResult:
         if entry.election_date is None:
             raise ValueError(f"File {entry.filename!r} has no election date.")
         download = self.http.get(
@@ -89,10 +96,12 @@ class EligendoService:
         rows = parse_zip_archive(
             download.content,
             max_uncompressed_bytes=self.settings.max_uncompressed_bytes,
+            municipality_level_only=municipality_level_only,
         )
         digest = hashlib.sha256(download.content).hexdigest()
         catalogue_id = self.database.replace_archive(entry, sha256=digest, rows=rows)
         party_rows = self.database.party_result_count(catalogue_id)
+        result_rows = self.database.election_result_count(catalogue_id)
         return ArchiveImportResult(
             catalogue_id=catalogue_id,
             category=entry.category,
@@ -102,6 +111,78 @@ class EligendoService:
             files=len({row.file_name for row in rows}),
             rows=len(rows),
             party_rows=party_rows,
+            result_rows=result_rows,
+        )
+
+    def import_history(
+        self,
+        *,
+        categories: list[str],
+        start_year: int | None = None,
+        end_year: int | None = None,
+        skip_existing: bool = True,
+        continue_on_error: bool = True,
+    ) -> HistoryImportResult:
+        requested = list(dict.fromkeys(categories))
+        invalid = sorted(set(requested) - ELECTION_CATEGORIES)
+        if invalid:
+            raise ValueError(f"Unsupported election categories: {', '.join(invalid)}")
+        if start_year is not None and end_year is not None and start_year > end_year:
+            raise ValueError("start_year must be less than or equal to end_year.")
+
+        entries = [
+            entry
+            for entry in self.catalogue()
+            if (
+                entry.category in requested
+                and entry.election_date is not None
+                and (start_year is None or entry.election_date.year >= start_year)
+                and (end_year is None or entry.election_date.year <= end_year)
+            )
+        ]
+        entries.sort(
+            key=lambda entry: (
+                entry.election_date or date.min,
+                entry.category,
+                entry.filename,
+            )
+        )
+
+        imports: list[ArchiveImportResult] = []
+        errors: list[dict[str, str]] = []
+        skipped = 0
+        for entry in entries:
+            if skip_existing and self.database.archive_is_normalised(entry):
+                skipped += 1
+                continue
+            try:
+                imports.append(
+                    self._import_entry(entry, municipality_level_only=True)
+                )
+            except Exception as exc:
+                errors.append(
+                    {
+                        "category": entry.category,
+                        "filename": entry.filename,
+                        "election_date": (
+                            entry.election_date.isoformat() if entry.election_date else ""
+                        ),
+                        "error": str(exc),
+                    }
+                )
+                if not continue_on_error:
+                    raise
+
+        return HistoryImportResult(
+            categories=requested,
+            start_year=start_year,
+            end_year=end_year,
+            archives_found=len(entries),
+            archives_imported=len(imports),
+            archives_skipped=skipped,
+            result_rows=sum(result.result_rows for result in imports),
+            imports=imports,
+            errors=errors,
         )
 
     def import_municipal_year(
@@ -112,7 +193,9 @@ class EligendoService:
         errors: list[dict[str, str]] = []
         for entry in entries:
             try:
-                imports.append(self._import_entry(entry))
+                imports.append(
+                    self._import_entry(entry, municipality_level_only=True)
+                )
             except Exception as exc:
                 errors.append(
                     {

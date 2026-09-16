@@ -18,9 +18,13 @@ from .schemas import (
     ArchiveImportResult,
     ArchiveRowsResponse,
     CatalogueEntry,
+    ElectionResultsResponse,
+    HistoryImportRequest,
+    HistoryImportResult,
     MunicipalYearImportRequest,
     MunicipalYearImportResult,
     MunicipalitiesResponse,
+    MunicipalityCoverageResponse,
     PageRequest,
     PageResult,
     PartyResultsResponse,
@@ -149,6 +153,182 @@ def archive_municipalities(
     return MunicipalitiesResponse(
         count=len(municipalities),
         municipalities=municipalities,
+    )
+
+
+@app.post(
+    "/api/v1/history/import",
+    response_model=HistoryImportResult,
+    tags=["history"],
+)
+def import_history(request: HistoryImportRequest) -> HistoryImportResult:
+    """Import every matching election archive with resumable skipping."""
+    return service.import_history(
+        categories=list(request.categories),
+        start_year=request.start_year,
+        end_year=request.end_year,
+        skip_existing=request.skip_existing,
+        continue_on_error=request.continue_on_error,
+    )
+
+
+@app.get(
+    "/api/v1/history/results",
+    response_model=ElectionResultsResponse,
+    tags=["history"],
+)
+def historical_results(
+    category: str | None = None,
+    year: Annotated[int | None, Query(ge=1946, le=2100)] = None,
+    election_date: date | None = None,
+    regione: str | None = None,
+    provincia: str | None = None,
+    comune: str | None = None,
+    tipo_risultato: str | None = None,
+    soggetto: str | None = None,
+    turno: Annotated[int | None, Query(ge=1)] = None,
+    limit: Annotated[int, Query(ge=1, le=5000)] = 1000,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> ElectionResultsResponse:
+    """Return paginated normalised results for every election category."""
+    count, rows = database.query_election_results(
+        category=category,
+        year=year,
+        election_date=election_date,
+        region=regione,
+        province=provincia,
+        municipality=comune,
+        result_type=tipo_risultato,
+        subject=soggetto,
+        round_number=turno,
+        limit=limit,
+        offset=offset,
+    )
+    return ElectionResultsResponse(count=count, limit=limit, offset=offset, rows=rows)
+
+
+HISTORY_CSV_FIELDS = [
+    "TIPO_ELEZIONE",
+    "DATA",
+    "TURNO",
+    "REGIONE",
+    "CIRCOSCRIZIONE",
+    "PROVINCIA",
+    "COMUNE",
+    "NAZIONE",
+    "COLLEGIO",
+    "NUMERO_QUESITO",
+    "QUESITO",
+    "TIPO_RISULTATO",
+    "SOGGETTO",
+    "PARTITO",
+    "CANDIDATO",
+    "OPZIONE_REFERENDUM",
+    "VOTI",
+    "PERCENTUALE",
+    "SEGGI",
+    "ELETTORI",
+    "ELETTORI_MASCHI",
+    "VOTANTI",
+    "VOTANTI_MASCHI",
+    "AFFLUENZA_PCT",
+    "VOTI_VALIDI",
+    "VOTI_VALIDI_LISTE",
+    "VOTI_VALIDI_CANDIDATO",
+    "SCHEDE_BIANCHE",
+    "SCHEDE_NON_VALIDE",
+    "SCHEDE_CONTESTATE",
+    "FONTE_URL",
+    "FONTE_FILE",
+    "FONTE_RIGA",
+    "SHA256",
+]
+
+
+@app.get("/api/v1/history/results.csv", tags=["history"])
+def historical_results_csv(
+    category: str | None = None,
+    year: Annotated[int | None, Query(ge=1946, le=2100)] = None,
+    election_date: date | None = None,
+    regione: str | None = None,
+    provincia: str | None = None,
+    comune: str | None = None,
+    tipo_risultato: str | None = None,
+    soggetto: str | None = None,
+    turno: Annotated[int | None, Query(ge=1)] = None,
+) -> StreamingResponse:
+    """Stream a semicolon-delimited UTF-8 export of all matching elections."""
+
+    def generate_csv():
+        buffer = io.StringIO()
+        writer = csv.DictWriter(
+            buffer,
+            fieldnames=HISTORY_CSV_FIELDS,
+            delimiter=";",
+            lineterminator="\n",
+        )
+        buffer.write("\ufeff")
+        writer.writeheader()
+        yield buffer.getvalue()
+        buffer.seek(0)
+        buffer.truncate(0)
+        for row in database.iter_election_results(
+            category=category,
+            year=year,
+            election_date=election_date,
+            region=regione,
+            province=provincia,
+            municipality=comune,
+            result_type=tipo_risultato,
+            subject=soggetto,
+            round_number=turno,
+        ):
+            writer.writerow({field: row[field.casefold()] for field in HISTORY_CSV_FIELDS})
+            yield buffer.getvalue()
+            buffer.seek(0)
+            buffer.truncate(0)
+
+    label = str(year) if year is not None else "all"
+    return StreamingResponse(
+        generate_csv(),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="all_election_results_{label}.csv"'
+            )
+        },
+    )
+
+
+@app.get(
+    "/api/v1/history/coverage/municipality",
+    response_model=MunicipalityCoverageResponse,
+    tags=["history"],
+)
+def municipality_history_coverage(
+    regione: str,
+    comune: str,
+) -> MunicipalityCoverageResponse:
+    """Check municipality availability across relevant imported elections."""
+    rows = database.municipality_coverage(region=regione, municipality=comune)
+    counts = {
+        status: sum(row["stato"] == status for row in rows)
+        for status in (
+            "present",
+            "missing",
+            "not_available_at_municipality_level",
+        )
+    }
+    return MunicipalityCoverageResponse(
+        regione=regione,
+        comune=comune,
+        elections_checked=len(rows),
+        present=counts["present"],
+        missing=counts["missing"],
+        not_available_at_municipality_level=counts[
+            "not_available_at_municipality_level"
+        ],
+        rows=rows,
     )
 
 

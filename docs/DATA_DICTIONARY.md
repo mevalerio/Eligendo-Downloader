@@ -1,5 +1,52 @@
 # Data dictionary
 
+## Unified historical result
+
+The `/api/v1/history/results.csv` export uses the following fields. Null values
+mean that the source archive did not publish that item for the observation.
+
+| CSV field | JSON field | Type | Definition |
+|---|---|---|---|
+| `TIPO_ELEZIONE` | `tipo_elezione` | text | Normalised election category |
+| `DATA` | `data` | ISO date | Election date |
+| `TURNO` | `turno` | integer or null | Ballot round |
+| `REGIONE` | `regione` | text or null | Region |
+| `CIRCOSCRIZIONE` | `circoscrizione` | text or null | Electoral constituency |
+| `PROVINCIA` | `provincia` | text or null | Province |
+| `COMUNE` | `comune` | text or null | Municipality |
+| `NAZIONE` | `nazione` | text or null | Country for overseas results |
+| `COLLEGIO` | `collegio` | text or null | Electoral college or retained Rome subdivision |
+| `NUMERO_QUESITO` | `numero_quesito` | text or null | Referendum question number |
+| `QUESITO` | `quesito` | text or null | Referendum question text |
+| `TIPO_RISULTATO` | `tipo_risultato` | text | `list`, `candidate`, or `option` |
+| `SOGGETTO` | `soggetto` | text | Result-bearing list, candidate, or option |
+| `PARTITO` | `partito` | text or null | Party or list label |
+| `CANDIDATO` | `candidato` | text or null | Candidate label |
+| `OPZIONE_REFERENDUM` | `opzione_referendum` | text or null | `SI` or `NO` |
+| `VOTI` | `voti` | integer | Votes for the result subject |
+| `PERCENTUALE` | `percentuale` | number or null | Calculated share of the available valid-vote denominator |
+| `SEGGI` | `seggi` | integer or null | Seats |
+| `ELETTORI` | `elettori` | integer or null | Registered electors |
+| `ELETTORI_MASCHI` | `elettori_maschi` | integer or null | Male electors |
+| `VOTANTI` | `votanti` | integer or null | Voters |
+| `VOTANTI_MASCHI` | `votanti_maschi` | integer or null | Male voters |
+| `AFFLUENZA_PCT` | `affluenza_pct` | number or null | Voters divided by electors, as a percentage |
+| `VOTI_VALIDI` | `voti_validi` | integer or null | Valid votes |
+| `VOTI_VALIDI_LISTE` | `voti_validi_liste` | integer or null | Valid list votes |
+| `VOTI_VALIDI_CANDIDATO` | `voti_validi_candidato` | integer or null | Valid candidate votes |
+| `SCHEDE_BIANCHE` | `schede_bianche` | integer or null | Blank ballots |
+| `SCHEDE_NON_VALIDE` | `schede_non_valide` | integer or null | Invalid ballots |
+| `SCHEDE_CONTESTATE` | `schede_contestate` | integer or null | Contested ballots |
+| `FONTE_URL` | `fonte_url` | URL | Official archive URL |
+| `FONTE_FILE` | `fonte_file` | text | Member file within the ZIP archive |
+| `FONTE_RIGA` | `fonte_riga` | integer | Source row; zero denotes a municipality aggregate |
+| `SHA256` | `sha256` | text | Digest of the imported ZIP archive |
+
+The eight `TIPO_ELEZIONE` values are `assemblea_costituente`, `camera`,
+`senato`, `europee`, `referendum`, `regionali`, `provinciali`, and `comunali`.
+The observational unit varies with the published source geography. Geography
+fields should therefore be retained when aggregating rows.
+
 ## Compact municipal result
 
 | CSV field | JSON field | Type | Definition |
@@ -38,6 +85,10 @@ Two distinct civic lists may share a label and remain separate observations.
 - Setting `tutti_turni=true` removes the round filter.
 - `year` uses the election date rather than the download or import date.
 - Pagination applies to JSON results. CSV export streams every matching row.
+- Unified-history filters can be combined across election type, year, exact
+  date, geography, result type, subject, and round.
+- A `FONTE_FILE` ending in `#municipality-aggregate` indicates that the source
+  supplied polling-station rows and the importer summed them by municipality.
 
 ## Provenance
 

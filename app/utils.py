@@ -15,6 +15,20 @@ def slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", ascii_value.casefold()).strip("_")
 
 
+def canonical_municipality(value: str | None) -> str | None:
+    cleaned = clean_text(value)
+    if not cleaned:
+        return None
+    folded = cleaned.casefold()
+    if (
+        folded.startswith("roma - ")
+        or folded == "roma centro"
+        or folded.startswith("roma zona ")
+    ):
+        return "ROMA"
+    return cleaned
+
+
 def parse_italian_int(value: str | None) -> int | None:
     if value is None:
         return None

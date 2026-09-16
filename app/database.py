@@ -7,7 +7,8 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .archive import ArchiveRow, normalise_party_result
+from .archive import ArchiveRow
+from .history import normalise_history_results
 from .schemas import CatalogueEntry, PageResult
 from .utils import slug
 
@@ -69,6 +70,54 @@ ON party_results(election_date, municipality_key, party_key, round);
 
 CREATE INDEX IF NOT EXISTS idx_party_results_catalogue
 ON party_results(catalogue_id);
+
+CREATE TABLE IF NOT EXISTS election_results (
+    id INTEGER PRIMARY KEY,
+    catalogue_id INTEGER NOT NULL REFERENCES catalogues(id) ON DELETE CASCADE,
+    election_date TEXT NOT NULL,
+    category TEXT NOT NULL,
+    round INTEGER,
+    region TEXT,
+    constituency TEXT,
+    province TEXT,
+    municipality TEXT,
+    municipality_key TEXT,
+    country TEXT,
+    college TEXT,
+    question_number TEXT,
+    question TEXT,
+    result_type TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    subject_key TEXT NOT NULL,
+    party TEXT,
+    candidate TEXT,
+    option TEXT,
+    votes INTEGER NOT NULL,
+    percentage REAL,
+    seats INTEGER,
+    electors INTEGER,
+    male_electors INTEGER,
+    voters INTEGER,
+    male_voters INTEGER,
+    turnout_percentage REAL,
+    valid_votes INTEGER,
+    valid_list_votes INTEGER,
+    valid_candidate_votes INTEGER,
+    blank_ballots INTEGER,
+    invalid_ballots INTEGER,
+    contested_ballots INTEGER,
+    source_file TEXT NOT NULL,
+    source_row INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_election_results_lookup
+ON election_results(
+    category, election_date, region, province, municipality_key,
+    result_type, subject_key, round
+);
+
+CREATE INDEX IF NOT EXISTS idx_election_results_catalogue
+ON election_results(catalogue_id);
 
 CREATE TABLE IF NOT EXISTS page_snapshots (
     id INTEGER PRIMARY KEY,
@@ -176,6 +225,9 @@ class Database:
             connection.execute(
                 "DELETE FROM party_results WHERE catalogue_id=?", (catalogue_id,)
             )
+            connection.execute(
+                "DELETE FROM election_results WHERE catalogue_id=?", (catalogue_id,)
+            )
             connection.executemany(
                 """
                 INSERT INTO archive_rows(
@@ -198,16 +250,77 @@ class Database:
                     for row in rows
                 ),
             )
+            history_results = normalise_history_results(
+                rows,
+                category=entry.category,
+                election_date=entry.election_date,
+            )
+            connection.executemany(
+                """
+                INSERT INTO election_results(
+                    catalogue_id, election_date, category, round, region,
+                    constituency, province, municipality, municipality_key,
+                    country, college, question_number, question, result_type,
+                    subject, subject_key, party, candidate, option, votes,
+                    percentage, seats, electors, male_electors, voters,
+                    male_voters, turnout_percentage, valid_votes,
+                    valid_list_votes, valid_candidate_votes, blank_ballots,
+                    invalid_ballots, contested_ballots, source_file, source_row
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )
+                """,
+                (
+                    (
+                        catalogue_id,
+                        result.election_date.isoformat(),
+                        result.category,
+                        result.round,
+                        result.region,
+                        result.constituency,
+                        result.province,
+                        result.municipality,
+                        result.municipality_key,
+                        result.country,
+                        result.college,
+                        result.question_number,
+                        result.question,
+                        result.result_type,
+                        result.subject,
+                        result.subject_key,
+                        result.party,
+                        result.candidate,
+                        result.option,
+                        result.votes,
+                        result.percentage,
+                        result.seats,
+                        result.electors,
+                        result.male_electors,
+                        result.voters,
+                        result.male_voters,
+                        result.turnout_percentage,
+                        result.valid_votes,
+                        result.valid_list_votes,
+                        result.valid_candidate_votes,
+                        result.blank_ballots,
+                        result.invalid_ballots,
+                        result.contested_ballots,
+                        result.source_file,
+                        result.source_row,
+                    )
+                    for result in history_results
+                ),
+            )
             party_results = [
                 result
-                for row in rows
+                for result in history_results
                 if (
-                    result := normalise_party_result(
-                        row,
-                        election_date=entry.election_date,
-                    )
+                    entry.category == "comunali"
+                    and result.result_type == "list"
+                    and result.municipality
+                    and result.party
                 )
-                is not None
             ]
             connection.executemany(
                 """
@@ -224,9 +337,9 @@ class Database:
                         result.region,
                         result.province,
                         result.municipality,
-                        result.municipality_key,
+                        result.municipality_key or slug(result.municipality),
                         result.party,
-                        result.party_key,
+                        result.subject_key,
                         result.votes,
                         result.round,
                         result.candidate,
@@ -248,6 +361,287 @@ class Database:
                     (catalogue_id,),
                 ).fetchone()["n"]
             )
+
+    def election_result_count(self, catalogue_id: int) -> int:
+        with closing(self.connect()) as connection:
+            return int(
+                connection.execute(
+                    "SELECT COUNT(*) AS n FROM election_results WHERE catalogue_id=?",
+                    (catalogue_id,),
+                ).fetchone()["n"]
+            )
+
+    def archive_is_normalised(self, entry: CatalogueEntry) -> bool:
+        if entry.election_date is None:
+            return False
+        with closing(self.connect()) as connection:
+            row = connection.execute(
+                """
+                SELECT c.id,
+                       EXISTS(
+                           SELECT 1 FROM election_results e
+                           WHERE e.catalogue_id = c.id
+                       ) AS has_results
+                FROM catalogues c
+                WHERE c.category=? AND c.election_date=? AND c.filename=?
+                """,
+                (
+                    entry.category,
+                    entry.election_date.isoformat(),
+                    entry.filename,
+                ),
+            ).fetchone()
+        return bool(row and row["has_results"])
+
+    @staticmethod
+    def _history_filters(
+        *,
+        category: str | None,
+        year: int | None,
+        election_date: date | None,
+        region: str | None,
+        province: str | None,
+        municipality: str | None,
+        result_type: str | None,
+        subject: str | None,
+        round_number: int | None,
+    ) -> tuple[str, list[Any]]:
+        clauses = ["1 = 1"]
+        parameters: list[Any] = []
+        if category:
+            clauses.append("e.category = ?")
+            parameters.append(category)
+        if year is not None:
+            clauses.append("substr(e.election_date, 1, 4) = ?")
+            parameters.append(str(year))
+        if election_date is not None:
+            clauses.append("e.election_date = ?")
+            parameters.append(election_date.isoformat())
+        if region:
+            clauses.append("e.region = ? COLLATE NOCASE")
+            parameters.append(region)
+        if province:
+            clauses.append("e.province = ? COLLATE NOCASE")
+            parameters.append(province)
+        if municipality:
+            clauses.append("e.municipality_key = ?")
+            parameters.append(slug(municipality))
+        if result_type:
+            clauses.append("e.result_type = ?")
+            parameters.append(result_type)
+        if subject:
+            clauses.append("e.subject_key = ?")
+            parameters.append(slug(subject))
+        if round_number is not None:
+            clauses.append("e.round = ?")
+            parameters.append(round_number)
+        return " AND ".join(clauses), parameters
+
+    @staticmethod
+    def _history_row(record: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "tipo_elezione": record["category"],
+            "data": record["election_date"],
+            "turno": record["round"],
+            "regione": record["region"],
+            "circoscrizione": record["constituency"],
+            "provincia": record["province"],
+            "comune": record["municipality"],
+            "nazione": record["country"],
+            "collegio": record["college"],
+            "numero_quesito": record["question_number"],
+            "quesito": record["question"],
+            "tipo_risultato": record["result_type"],
+            "soggetto": record["subject"],
+            "partito": record["party"],
+            "candidato": record["candidate"],
+            "opzione_referendum": record["option"],
+            "voti": record["votes"],
+            "percentuale": record["percentage"],
+            "seggi": record["seats"],
+            "elettori": record["electors"],
+            "elettori_maschi": record["male_electors"],
+            "votanti": record["voters"],
+            "votanti_maschi": record["male_voters"],
+            "affluenza_pct": record["turnout_percentage"],
+            "voti_validi": record["valid_votes"],
+            "voti_validi_liste": record["valid_list_votes"],
+            "voti_validi_candidato": record["valid_candidate_votes"],
+            "schede_bianche": record["blank_ballots"],
+            "schede_non_valide": record["invalid_ballots"],
+            "schede_contestate": record["contested_ballots"],
+            "fonte_url": record["download_url"],
+            "fonte_file": record["source_file"],
+            "fonte_riga": record["source_row"],
+            "sha256": record["sha256"],
+        }
+
+    def query_election_results(
+        self,
+        *,
+        category: str | None,
+        year: int | None,
+        election_date: date | None,
+        region: str | None,
+        province: str | None,
+        municipality: str | None,
+        result_type: str | None,
+        subject: str | None,
+        round_number: int | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[int, list[dict[str, Any]]]:
+        where, parameters = self._history_filters(
+            category=category,
+            year=year,
+            election_date=election_date,
+            region=region,
+            province=province,
+            municipality=municipality,
+            result_type=result_type,
+            subject=subject,
+            round_number=round_number,
+        )
+        with closing(self.connect()) as connection:
+            count = int(
+                connection.execute(
+                    f"SELECT COUNT(*) AS n FROM election_results e WHERE {where}",
+                    parameters,
+                ).fetchone()["n"]
+            )
+            selected = connection.execute(
+                f"""
+                SELECT e.*, c.download_url, c.sha256
+                FROM election_results e
+                JOIN catalogues c ON c.id = e.catalogue_id
+                WHERE {where}
+                ORDER BY e.election_date, e.category, e.region, e.province,
+                         e.municipality, e.question_number, e.result_type,
+                         e.subject, e.source_file, e.source_row
+                LIMIT ? OFFSET ?
+                """,
+                [*parameters, limit, offset],
+            ).fetchall()
+        return count, [self._history_row(record) for record in selected]
+
+    def iter_election_results(
+        self,
+        *,
+        category: str | None,
+        year: int | None,
+        election_date: date | None,
+        region: str | None,
+        province: str | None,
+        municipality: str | None,
+        result_type: str | None,
+        subject: str | None,
+        round_number: int | None,
+    ):
+        where, parameters = self._history_filters(
+            category=category,
+            year=year,
+            election_date=election_date,
+            region=region,
+            province=province,
+            municipality=municipality,
+            result_type=result_type,
+            subject=subject,
+            round_number=round_number,
+        )
+        connection = self.connect()
+        try:
+            cursor = connection.execute(
+                f"""
+                SELECT e.*, c.download_url, c.sha256
+                FROM election_results e
+                JOIN catalogues c ON c.id = e.catalogue_id
+                WHERE {where}
+                ORDER BY e.election_date, e.category, e.region, e.province,
+                         e.municipality, e.question_number, e.result_type,
+                         e.subject, e.source_file, e.source_row
+                """,
+                parameters,
+            )
+            for record in cursor:
+                yield self._history_row(record)
+        finally:
+            connection.close()
+
+    def municipality_coverage(
+        self, *, region: str, municipality: str
+    ) -> list[dict[str, Any]]:
+        municipality_key = slug(municipality)
+        national_categories = (
+            "assemblea_costituente",
+            "camera",
+            "senato",
+            "europee",
+            "referendum",
+        )
+        placeholders = ",".join("?" for _ in national_categories)
+        with closing(self.connect()) as connection:
+            selected = connection.execute(
+                f"""
+                SELECT c.category, c.election_date, c.filename, c.download_url,
+                       c.sha256,
+                       SUM(CASE WHEN e.municipality IS NOT NULL THEN 1 ELSE 0 END)
+                           AS municipality_rows,
+                       SUM(CASE WHEN e.municipality_key = ? THEN 1 ELSE 0 END)
+                           AS target_rows,
+                       SUM(
+                           CASE
+                               WHEN e.region = ? COLLATE NOCASE
+                                 OR e.municipality_key = ?
+                               THEN 1 ELSE 0
+                           END
+                       ) AS region_rows
+                FROM catalogues c
+                LEFT JOIN election_results e ON e.catalogue_id = c.id
+                WHERE c.category IN ({placeholders})
+                   OR EXISTS(
+                       SELECT 1 FROM election_results ee
+                       WHERE ee.catalogue_id = c.id
+                         AND (
+                             ee.region = ? COLLATE NOCASE
+                             OR ee.municipality_key = ?
+                         )
+                   )
+                GROUP BY c.id
+                ORDER BY c.election_date, c.category, c.filename
+                """,
+                (
+                    municipality_key,
+                    region,
+                    municipality_key,
+                    *national_categories,
+                    region,
+                    municipality_key,
+                ),
+            ).fetchall()
+
+        coverage = []
+        for record in selected:
+            if record["target_rows"]:
+                status = "present"
+            elif not record["municipality_rows"]:
+                status = "not_available_at_municipality_level"
+            else:
+                status = "missing"
+            coverage.append(
+                {
+                    "tipo_elezione": record["category"],
+                    "data": record["election_date"],
+                    "filename": record["filename"],
+                    "regione": region,
+                    "comune": municipality,
+                    "stato": status,
+                    "righe_comune": int(record["target_rows"] or 0),
+                    "righe_livello_comunale": int(record["municipality_rows"] or 0),
+                    "fonte_url": record["download_url"],
+                    "sha256": record["sha256"],
+                }
+            )
+        return coverage
 
     @staticmethod
     def _party_filters(

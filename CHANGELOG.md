@@ -4,6 +4,22 @@ All notable project changes are documented in this file.
 
 ## Unreleased
 
+## 2.1.0
+
+- Added resumable bulk import for all eight election categories.
+- Added a unified JSON and streaming CSV history export with election,
+  geography, result, turnout, ballot, seat, and provenance fields.
+- Added municipality coverage auditing across national and relevant local
+  elections.
+- Added referendum option normalisation and municipality aggregation for
+  section-only local archives.
+- Added support for recent European, regional, municipal, and referendum
+  archive schemas and historical headerless files.
+- Canonicalised historical Rome electoral subdivisions to municipality `ROMA`
+  while preserving their college labels.
+- Validated all 288 archives in the live catalogue available during the 2.1.0
+  audit; every archive produced normalised result rows.
+
 ## 2.0.0
 
 - Replaced the TypeScript demonstration application with a Python FastAPI
