@@ -6,12 +6,14 @@ import math
 import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
+from itertools import chain
 from pathlib import PurePosixPath
 from typing import Any, Iterable
 
 from openpyxl import load_workbook
 
-from .utils import clean_text, slug
+from .utils import canonical_municipality, clean_text, slug
 
 
 @dataclass(frozen=True)
@@ -111,30 +113,97 @@ def _as_int(value: Any) -> int | None:
         return value
     if isinstance(value, float):
         return int(value) if value.is_integer() else None
-    text = clean_text(str(value)).replace(".", "").replace(" ", "")
+    text = clean_text(str(value)).replace(" ", "")
+    if "," in text:
+        try:
+            number = Decimal(text.replace(".", "").replace(",", "."))
+        except InvalidOperation:
+            return None
+        return int(number) if number == number.to_integral_value() else None
+    text = text.replace(".", "")
     if text.lstrip("+-").isdigit():
         return int(text)
     return None
 
 
 def _archive_row(file_name: str, row_number: int, payload: dict[str, Any]) -> ArchiveRow:
-    municipality = _first(
-        payload,
-        ("comune", "denominazione_comune", "descrizione_comune"),
+    municipality = canonical_municipality(
+        _first(
+            payload,
+            (
+                "comune",
+                "com",
+                "desccomune",
+                "denominazione_comune",
+                "descrizione_comune",
+                "denominazione",
+            ),
+        )
     )
     return ArchiveRow(
         file_name=file_name,
         row_number=row_number,
-        region=_first(payload, ("regione", "denominazione_regione")),
+        region=_first(
+            payload,
+            ("regione", "reg", "descregione", "denominazione_regione"),
+        ),
         circoscrizione=_first(
             payload,
-            ("circoscrizione", "denominazione_circoscrizione"),
+            (
+                "circoscrizione",
+                "circoscr",
+                "circ_reg",
+                "desccirceuropea",
+                "denominazione_circoscrizione",
+            ),
         ),
-        province=_first(payload, ("provincia", "denominazione_provincia")),
+        province=_first(
+            payload,
+            ("provincia", "prov", "descprovincia", "denominazione_provincia"),
+        ),
         municipality=municipality,
         municipality_key=slug(municipality) if municipality else None,
         payload=payload,
     )
+
+
+def _headerless_fields(file_name: str, count: int) -> list[str] | None:
+    file_key = slug(file_name)
+    if "referendum" in file_key and count == 12:
+        return [
+            "regione",
+            "provincia",
+            "comune",
+            "num_referendum",
+            "quesito",
+            "elettori",
+            "elettori_maschi",
+            "votanti",
+            "votanti_maschi",
+            "numvotisi",
+            "numvotino",
+            "schede_bianche",
+        ]
+    if "comunali" in file_key and count == 16:
+        return [
+            "regione",
+            "provincia",
+            "comune",
+            "elettoritot",
+            "votantitot",
+            "skbianche",
+            "descrlista",
+            "votilista",
+            "seggilista",
+            "cognome",
+            "nome",
+            "datanascita",
+            "luogonascita",
+            "sesso",
+            "codtipoeletto",
+            "voticand",
+        ]
+    return None
 
 
 def _delimited_rows(content: bytes, file_name: str) -> Iterable[ArchiveRow]:
@@ -145,13 +214,44 @@ def _delimited_rows(content: bytes, file_name: str) -> Iterable[ArchiveRow]:
     except csv.Error:
         dialect = None
     reader = (
-        csv.DictReader(io.StringIO(text), dialect=dialect)
+        csv.reader(io.StringIO(text), dialect=dialect)
         if dialect is not None
-        else csv.DictReader(io.StringIO(text), delimiter=";")
+        else csv.reader(io.StringIO(text), delimiter=";")
     )
-    if not reader.fieldnames:
+    first_row = next(reader, None)
+    if not first_row:
         return
-    for row_number, raw in enumerate(reader, start=2):
+    candidate_headers = [slug(str(value)) for value in first_row]
+    known_headers = {
+        "regione",
+        "provincia",
+        "comune",
+        "circoscrizione",
+        "dataelezione",
+        "lista",
+        "descrlista",
+        "elettori",
+        "elettoritot",
+        "voti",
+        "votilista",
+        "voti_lista",
+    }
+    inferred = _headerless_fields(file_name, len(first_row))
+    if sum(header in known_headers for header in candidate_headers) >= 2:
+        headers = candidate_headers
+        data_rows = reader
+        start_row = 2
+    elif inferred:
+        headers = inferred
+        data_rows = chain([first_row], reader)
+        start_row = 1
+    else:
+        headers = candidate_headers
+        data_rows = reader
+        start_row = 2
+
+    for row_number, values in enumerate(data_rows, start=start_row):
+        raw = dict(zip(headers, values, strict=False))
         payload = _normalise_row(raw)
         if payload:
             yield _archive_row(file_name, row_number, payload)
@@ -196,7 +296,29 @@ def _xlsx_rows(content: bytes, file_name: str) -> Iterable[ArchiveRow]:
         workbook.close()
 
 
-def parse_zip_archive(content: bytes, *, max_uncompressed_bytes: int) -> list[ArchiveRow]:
+def _municipality_level_member(file_name: str) -> bool:
+    file_key = slug(file_name)
+    excluded_markers = (
+        "livsez",
+        "liv_sez",
+        "preferenze",
+        "prefeuropee",
+        "sezioni",
+        "votanti_varie_ore",
+        "votantivarieore",
+        "candidatilista",
+        "candlista",
+        "candidcollegio",
+    )
+    return not any(marker in file_key for marker in excluded_markers)
+
+
+def parse_zip_archive(
+    content: bytes,
+    *,
+    max_uncompressed_bytes: int,
+    municipality_level_only: bool = False,
+) -> list[ArchiveRow]:
     rows: list[ArchiveRow] = []
     with zipfile.ZipFile(io.BytesIO(content)) as archive:
         candidates = []
@@ -208,7 +330,14 @@ def parse_zip_archive(content: bytes, *, max_uncompressed_bytes: int) -> list[Ar
             total_size += info.file_size
             if total_size > max_uncompressed_bytes:
                 raise ValueError("The ZIP archive exceeds the maximum extracted size.")
-            if not info.is_dir() and path.suffix.casefold() in {".txt", ".csv", ".xlsx"}:
+            if (
+                not info.is_dir()
+                and path.suffix.casefold() in {".txt", ".csv", ".xlsx"}
+                and (
+                    not municipality_level_only
+                    or _municipality_level_member(info.filename)
+                )
+            ):
                 candidates.append(info)
         if not candidates:
             raise ValueError("The ZIP archive contains no supported TXT, CSV, or XLSX files.")

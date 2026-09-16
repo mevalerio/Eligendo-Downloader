@@ -11,16 +11,20 @@ The service combines two sources from the same official portal:
    the website, including turnout, ballots, candidates, lists, votes,
    percentages, and seats.
 
-Imported records are stored in SQLite. Municipal party results are also exposed
-in the uniform format:
+Imported records are stored in SQLite. The unified history API covers every
+election category published in the Open Data catalogue and exposes results in
+the core format:
 
 ```text
 DATA;COMUNE;PARTITO;VOTI
 ```
 
-The field names in that compact export remain in Italian to match the requested
-research format and the terminology used by the source. API documentation is
-generated automatically with Swagger UI.
+The full export adds all metadata available in each source, including election
+type, round, region, constituency, province, country, college, referendum
+question, candidate, seats, electorate, voters, turnout, valid votes, ballots,
+and provenance. Field names remain in Italian to match the requested research
+format and the terminology used by the source. API documentation is generated
+automatically with Swagger UI.
 
 ## Requirements
 
@@ -39,6 +43,82 @@ uvicorn app.main:app --reload
 ```
 
 Open <http://127.0.0.1:8000/docs> to explore and run the API.
+
+## Complete election history
+
+### Import every published election
+
+```powershell
+$body = @{
+  categories = @(
+    "assemblea_costituente", "camera", "senato", "europee",
+    "referendum", "regionali", "provinciali", "comunali"
+  )
+  skip_existing = $true
+  continue_on_error = $true
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8000/api/v1/history/import `
+  -ContentType application/json `
+  -Body $body
+```
+
+The default request includes all eight categories. `start_year` and `end_year`
+can restrict the period. Imports are resumable: with `skip_existing=true`, an
+archive that already has normalised results is not downloaded again. A complete
+history requires several gigabytes of local storage and may take substantial
+time, depending on the catalogue and connection.
+
+The importer handles aggregate municipality files and, where recent local
+archives publish only polling-station results, aggregates those rows to the
+municipality level. Source file and row references remain attached to every
+observation.
+
+### Query and export the unified dataset
+
+Paginated JSON for Rome across all categories:
+
+```text
+GET /api/v1/history/results?comune=ROMA&limit=1000&offset=0
+```
+
+Complete semicolon-delimited CSV:
+
+```text
+GET /api/v1/history/results.csv
+```
+
+The CSV can be filtered with `category`, `year`, `election_date`, `regione`,
+`provincia`, `comune`, `tipo_risultato`, `soggetto`, and `turno`. For example:
+
+```text
+GET /api/v1/history/results.csv?category=camera&year=2022&comune=ROMA
+```
+
+`tipo_risultato` is `list`, `candidate`, or `option`. Referendum `SI` and `NO`
+votes are separate option rows. The complete column definition is in the
+[data dictionary](docs/DATA_DICTIONARY.md).
+
+### Check Rome across elections involving Lazio
+
+```text
+GET /api/v1/history/coverage/municipality?regione=LAZIO&comune=ROMA
+```
+
+The check includes every national election and each local election whose
+imported results contain Lazio. Status values mean:
+
+- `present`: the archive contains result rows indexed to Rome;
+- `missing`: municipality-level data exist, but Rome did not appear among the
+  municipalities voting in that particular local election; and
+- `not_available_at_municipality_level`: the archive publishes results only at
+  a broader geography, so Rome cannot be tested from that file.
+
+Historical Chamber and Senate archives that label Rome by electoral
+subdivision (for example, `Roma - Appio Latino`) are indexed under `ROMA`; the
+original subdivision remains available in `COLLEGIO`.
 
 ## Municipal results by year
 
@@ -183,6 +263,10 @@ linking them to their candidate.
 | `GET` | `/api/v1/archives/results` | Search by election, municipality, and province |
 | `GET` | `/api/v1/archives/municipalities` | List municipalities in an imported election |
 | `POST` | `/api/v1/pages/parse` | Parse one exact archive URL |
+| `POST` | `/api/v1/history/import` | Resumably import all selected election categories |
+| `GET` | `/api/v1/history/results` | Query unified all-election results as JSON |
+| `GET` | `/api/v1/history/results.csv` | Stream the complete or filtered history as CSV |
+| `GET` | `/api/v1/history/coverage/municipality` | Audit a municipality across relevant elections |
 | `POST` | `/api/v1/municipal/import-year` | Import all municipal elections for a year |
 | `GET` | `/api/v1/municipal/party-results` | Return normalised party results as JSON |
 | `GET` | `/api/v1/municipal/party-results.csv` | Export filtered results as CSV |

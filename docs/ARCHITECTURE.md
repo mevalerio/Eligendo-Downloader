@@ -4,8 +4,8 @@
 
 Eligendo API turns heterogeneous election files and municipality-level web
 pages into queryable, provenance-preserving records. The application keeps raw
-source fields available while maintaining a compact table for municipal party
-results.
+source fields available, maintains a compact table for municipal party results,
+and builds a unified result table spanning all eight election categories.
 
 ## Data flow
 
@@ -19,7 +19,7 @@ Official Open Data catalogue
  ZIP validation and parsing -----> raw archive rows
           |                              |
           v                              v
- party-result normalisation -------> SQLite
+ all-election normalisation -------> SQLite
                                          |
                                          v
                             JSON and CSV API endpoints
@@ -33,7 +33,11 @@ Exact archive page -> HTML parser -> optional SQLite snapshot
   applies the request interval; and enforces download-size limits.
 - `app/catalogue.py` extracts and filters the official Open Data catalogue.
 - `app/archive.py` validates ZIP paths, reads TXT/CSV/XLSX files, preserves
-  source rows, and derives municipal party-result records.
+  source rows, filters preference and polling-station files where aggregate
+  files exist, and derives municipal party-result records.
+- `app/history.py` maps heterogeneous result, geography, electorate, turnout,
+  ballot, and referendum fields to the unified historical result model. It can
+  aggregate section-only local archives to municipalities.
 - `app/scraper.py` parses election metadata, geography, summaries,
   candidates, lists, totals, votes, percentages, and seats from HTML pages.
 - `app/database.py` owns the SQLite schema, transactional replacement, and
@@ -49,6 +53,7 @@ The SQLite database contains:
 
 - catalogue metadata and archive digests;
 - normalised raw rows with their original payload;
+- unified historical result rows for every election category;
 - municipal party-result rows;
 - optional snapshots of parsed HTML pages.
 
@@ -58,9 +63,17 @@ does not leave an election in a partially updated state.
 ## Normalisation boundary
 
 The importer normalises column names to `snake_case` and recognises a controlled
-set of aliases for municipality, province, party, votes, seats, candidates, and
-rounds. Unrecognised columns remain in the raw payload. This design permits
-future alias additions without discarding source information.
+set of aliases for geography, parties, candidates, referendum options, votes,
+seats, electorate, turnout, ballots, and rounds. Unrecognised columns remain in
+the raw payload. This design permits future alias additions without discarding
+source information.
+
+The unified table uses one row per published result subject: list, candidate,
+or referendum option. Where a source exposes Rome through historical electoral
+subdivisions, the municipality is canonicalised to `ROMA` and the original
+subdivision is retained as the college. Section-only archives are grouped by
+municipality and result subject before insertion; their provenance uses a
+`#municipality-aggregate` source marker.
 
 The compact municipal export is a projection:
 
