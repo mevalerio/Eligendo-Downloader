@@ -116,9 +116,51 @@ imported results contain Lazio. Status values mean:
 - `not_available_at_municipality_level`: the archive publishes results only at
   a broader geography, so Rome cannot be tested from that file.
 
-Historical Chamber and Senate archives that label Rome by electoral
-subdivision (for example, `Roma - Appio Latino`) are indexed under `ROMA`; the
-original subdivision remains available in `COLLEGIO`.
+Historical Chamber and Senate archives that label a city by electoral
+subdivision (for example, `Roma - Appio Latino`, `Firenze Nord`, or
+`Parte di Comune TARANTO`) are indexed under the canonical municipality; the
+original electoral subdivision remains available in `COLLEGIO`.
+
+### Download the electoral-law corpus
+
+The legal catalogue covers the principal post-war national electoral regimes
+represented in the archive, including the 1946 Constituent Assembly rules,
+Chamber, Senate, European and referendum laws, and the official 1948, 1993,
+2017 and 2020 college-boundary instruments.
+
+```text
+GET /api/v1/legal/electoral-laws
+```
+
+Download and SHA-256 hash every source:
+
+```powershell
+$body = @{ overwrite = $false } | ConvertTo-Json
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8000/api/v1/legal/electoral-laws/download `
+  -ContentType application/json `
+  -Body $body
+```
+
+Gazzetta Ufficiale HTML acts are saved as self-contained bundles containing
+the act menu and every linked article or annex. Large boundary supplements are
+retained as the official PDFs. Existing files are reused unless
+`overwrite=true`; every result reports its path, byte size and digest.
+
+### Audit a split municipality
+
+```text
+GET /api/v1/history/audit/municipality?comune=ROMA
+```
+
+The audit reconstructs municipality totals across every reported college,
+checks votes against voters and electors, and compares the electorate with the
+nearest election of the same category. `parti_rilevate` records the number of
+college fragments found and `fonte_confini_id` identifies the applicable
+official boundary instrument. Use `category=camera` or `category=senato` to
+restrict the check. The validation method and full research run are documented
+in [Split-municipality audit](docs/SPLIT_MUNICIPALITY_AUDIT.md).
 
 ## Municipal results by year
 
@@ -267,6 +309,9 @@ linking them to their candidate.
 | `GET` | `/api/v1/history/results` | Query unified all-election results as JSON |
 | `GET` | `/api/v1/history/results.csv` | Stream the complete or filtered history as CSV |
 | `GET` | `/api/v1/history/coverage/municipality` | Audit a municipality across relevant elections |
+| `GET` | `/api/v1/history/audit/municipality` | Reconstruct and sense-check a split municipality |
+| `GET` | `/api/v1/legal/electoral-laws` | List official electoral laws and boundary instruments |
+| `POST` | `/api/v1/legal/electoral-laws/download` | Download, bundle, and hash legal sources |
 | `POST` | `/api/v1/municipal/import-year` | Import all municipal elections for a year |
 | `GET` | `/api/v1/municipal/party-results` | Return normalised party results as JSON |
 | `GET` | `/api/v1/municipal/party-results.csv` | Export filtered results as CSV |
@@ -292,7 +337,8 @@ docker run --rm -p 8000:8000 -v eligendo-data:/service/data eligendo-api
 
 ## Data integrity and safety
 
-- Only HTTPS URLs on the Ministry's two allow-listed domains are accepted.
+- Only HTTPS URLs on the configured Ministry, Gazzetta Ufficiale, and
+  Normattiva domains are accepted.
 - Every redirect target is validated before it is followed.
 - Requests are rate-limited and the official catalogue is cached.
 - ZIP archives are checked for configured size limits and unsafe paths.

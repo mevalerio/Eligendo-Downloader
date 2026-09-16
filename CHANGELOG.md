@@ -4,6 +4,20 @@ All notable project changes are documented in this file.
 
 ## Unreleased
 
+## 2.2.0
+
+- Added a downloadable, hashed catalogue of 19 principal national electoral
+  laws and official college-boundary instruments from Gazzetta Ufficiale.
+- Added complete offline HTML bundling of every article and annex linked by a
+  Gazzetta act, plus bounded retries for transient network failures.
+- Added a Chamber/Senate split-municipality audit with reconstructed college
+  totals, nearest-election electorate comparisons, and boundary-source IDs.
+- Canonicalised historical named districts and explicit `Parte di Comune`
+  records for 28 split municipalities while preserving college labels.
+- Added full and abbreviated historical college-field aliases used by the 1994
+  to 2018 national archives.
+- Documented the 1,020-row audit run and the remaining source anomalies.
+
 ## 2.1.0
 
 - Added resumable bulk import for all eight election categories.

@@ -241,3 +241,68 @@ class MunicipalityCoverageResponse(BaseModel):
     missing: int
     not_available_at_municipality_level: int
     rows: list[MunicipalityCoverageRow]
+
+
+class ElectoralLawEntry(BaseModel):
+    id: str
+    date: date
+    citation: str
+    title: str
+    kind: Literal["electoral_law", "boundary_decree", "boundary_correction"]
+    applies_to: list[str]
+    election_years: str
+    source_url: str
+    download_url: str
+    file_format: Literal["html", "pdf"]
+    downloaded: bool = False
+    local_path: str | None = None
+
+
+class ElectoralLawDownloadRequest(BaseModel):
+    ids: list[str] | None = None
+    overwrite: bool = False
+
+
+class DownloadedElectoralLaw(BaseModel):
+    id: str
+    local_path: str
+    sha256: str
+    bytes: int
+    content_type: str | None = None
+    downloaded: bool
+
+
+class ElectoralLawDownloadResult(BaseModel):
+    requested: int
+    downloaded: int
+    reused: int
+    files: list[DownloadedElectoralLaw]
+
+
+class MunicipalityAuditRow(BaseModel):
+    tipo_elezione: str
+    data: date
+    comune: str
+    fonte_file: str
+    tipo_risultato: str
+    parti_rilevate: int
+    aventi_diritto: int | None = None
+    votanti: int | None = None
+    voti_risultato: int
+    rapporto_voti_aventi_diritto: float | None = None
+    data_riferimento: date | None = None
+    aventi_diritto_riferimento: int | None = None
+    rapporto_aventi_diritto_riferimento: float | None = None
+    fonte_confini_id: str | None = None
+    stato: Literal["pass", "warning", "invalid", "insufficient_data"]
+
+
+class MunicipalityAuditResponse(BaseModel):
+    comune: str
+    categories: list[str]
+    elections_checked: int
+    passed: int
+    warnings: int
+    invalid: int
+    insufficient_data: int
+    rows: list[MunicipalityAuditRow]

@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import threading
 import time
 from datetime import date
+from pathlib import Path
+from urllib.parse import urldefrag, urljoin
+
+from bs4 import BeautifulSoup
 
 from .archive import parse_zip_archive
 from .catalogue import CATALOGUE_URL, catalogue_matches, parse_catalogue_html
 from .config import Settings
 from .database import Database
+from .electoral_laws import ELECTORAL_LAWS, LAW_BY_ID
 from .history import ELECTION_CATEGORIES
-from .http_client import SafeHttpClient
+from .http_client import Download, SafeHttpClient
 from .schemas import (
     ArchiveImportResult,
     CatalogueEntry,
@@ -63,6 +69,124 @@ class EligendoService:
         if store:
             self.database.store_snapshot(result)
         return result
+
+    def electoral_laws(self) -> list[dict[str, object]]:
+        law_dir = self.settings.data_dir / "electoral_laws"
+        rows: list[dict[str, object]] = []
+        for law in ELECTORAL_LAWS:
+            path = law_dir / f"{law.id}.{law.file_format}"
+            rows.append(
+                {
+                    "id": law.id,
+                    "date": law.date,
+                    "citation": law.citation,
+                    "title": law.title,
+                    "kind": law.kind,
+                    "applies_to": list(law.applies_to),
+                    "election_years": law.election_years,
+                    "source_url": law.source_url,
+                    "download_url": law.download_url,
+                    "file_format": law.file_format,
+                    "downloaded": path.exists(),
+                    "local_path": str(path) if path.exists() else None,
+                }
+            )
+        return rows
+
+    def download_electoral_laws(
+        self, *, ids: list[str] | None, overwrite: bool
+    ) -> dict[str, object]:
+        requested_ids = list(dict.fromkeys(ids or [law.id for law in ELECTORAL_LAWS]))
+        unknown = sorted(set(requested_ids) - LAW_BY_ID.keys())
+        if unknown:
+            raise ValueError(f"Unknown electoral-law ids: {', '.join(unknown)}")
+
+        law_dir = self.settings.data_dir / "electoral_laws"
+        law_dir.mkdir(parents=True, exist_ok=True)
+        files = []
+        downloaded = 0
+        reused = 0
+        for law_id in requested_ids:
+            law = LAW_BY_ID[law_id]
+            path = law_dir / f"{law.id}.{law.file_format}"
+            content_type = None
+            was_downloaded = overwrite or not path.exists()
+            if was_downloaded:
+                response = self.http.get(
+                    law.download_url,
+                    max_bytes=self.settings.max_archive_bytes,
+                )
+                content = response.content
+                if law.file_format == "html":
+                    content = self._complete_gazette_html(response)
+                temporary = Path(f"{path}.part")
+                temporary.write_bytes(content)
+                temporary.replace(path)
+                content_type = response.content_type
+                downloaded += 1
+            else:
+                reused += 1
+            content = path.read_bytes()
+            files.append(
+                {
+                    "id": law.id,
+                    "local_path": str(path),
+                    "sha256": hashlib.sha256(content).hexdigest(),
+                    "bytes": len(content),
+                    "content_type": content_type,
+                    "downloaded": was_downloaded,
+                }
+            )
+        return {
+            "requested": len(requested_ids),
+            "downloaded": downloaded,
+            "reused": reused,
+            "files": files,
+        }
+
+    def _complete_gazette_html(self, menu: Download) -> bytes:
+        """Combine a Gazzetta act menu and all linked articles into one HTML file."""
+        text = menu.content.decode("utf-8", errors="replace")
+        soup = BeautifulSoup(text, "html.parser")
+        article_urls: list[str] = []
+        seen: set[str] = set()
+        for link in soup.select('a[href*="caricaArticolo"]'):
+            href = link.get("href")
+            if not isinstance(href, str):
+                continue
+            url = urldefrag(urljoin(menu.final_url, href))[0]
+            if url not in seen:
+                seen.add(url)
+                article_urls.append(url)
+
+        sections = [
+            '<section data-source-role="act-menu">',
+            text,
+            "</section>",
+        ]
+        for index, url in enumerate(article_urls, start=1):
+            article = self.http.get(
+                url,
+                max_bytes=self.settings.max_archive_bytes,
+            )
+            article_text = article.content.decode("utf-8", errors="replace")
+            sections.extend(
+                [
+                    (
+                        f'<section data-source-role="article" '
+                        f'data-source-index="{index}" '
+                        f'data-source-url="{html.escape(article.final_url, quote=True)}">'
+                    ),
+                    article_text,
+                    "</section>",
+                ]
+            )
+        return (
+            "<!doctype html>\n<html><head><meta charset=\"utf-8\">"
+            "<title>Official Gazzetta Ufficiale act bundle</title></head><body>\n"
+            + "\n".join(sections)
+            + "\n</body></html>\n"
+        ).encode("utf-8")
 
     def import_archive(self, *, category: str, election_date: date) -> ArchiveImportResult:
         candidates = [

@@ -107,3 +107,39 @@ def test_historical_rome_constituency_is_canonicalised_as_municipality() -> None
     assert rows[0].municipality == "ROMA"
     assert rows[0].municipality_key == "roma"
     assert rows[0].payload["collegio"] == "Roma - Appio Latino"
+
+
+def test_other_historical_split_cities_are_canonicalised() -> None:
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr(
+            "camera.txt",
+            (
+                "comune;lista;voti_lista\n"
+                "Milano 10;LISTA A;100\n"
+                "Napoli - Vomero;LISTA A;200\n"
+                "Reggio Calabria - Sbarre;LISTA A;300\n"
+                "Parma centro;LISTA A;400\n"
+                "Messina centro storico;LISTA A;500\n"
+                "Firenze Nord;LISTA A;600\n"
+                "Palermo Sud;LISTA A;700\n"
+                "Parte di Comune TARANTO;LISTA A;800\n"
+                "parte del comune di Trieste;LISTA A;900\n"
+                "Parte di Comune REGGIO DI CALABRIA;LISTA A;1000\n"
+            ),
+        )
+
+    rows = parse_zip_archive(stream.getvalue(), max_uncompressed_bytes=100_000)
+
+    assert [row.municipality for row in rows] == [
+        "MILANO",
+        "NAPOLI",
+        "REGGIO CALABRIA",
+        "PARMA",
+        "MESSINA",
+        "FIRENZE",
+        "PALERMO",
+        "TARANTO",
+        "TRIESTE",
+        "REGGIO CALABRIA",
+    ]
