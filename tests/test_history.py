@@ -356,6 +356,95 @@ def test_history_api_and_rome_lazio_coverage(tmp_path, monkeypatch) -> None:
     assert coverage["not_available_at_municipality_level"] == 1
 
 
+def test_national_geography_table_groups_units_and_streams_csv(
+    tmp_path, monkeypatch
+) -> None:
+    database = Database(tmp_path / "geography.sqlite3")
+    database.replace_archive(
+        entry("camera", date(1994, 3, 27), "camera-19940327.zip"),
+        sha256="camera",
+        rows=[
+            source_row(
+                {
+                    "lista": "LISTA A",
+                    "voti_lista": "40",
+                    "elettori": "100",
+                    "votanti": "80",
+                    "voti_validi": "50",
+                    "collegio": "ROMA 1",
+                },
+                row_number=2,
+            ),
+            source_row(
+                {
+                    "lista": "LISTA B",
+                    "voti_lista": "10",
+                    "elettori": "100",
+                    "votanti": "80",
+                    "voti_validi": "50",
+                    "collegio": "ROMA 1",
+                },
+                file_name="candidate-results.csv",
+                row_number=3,
+            ),
+            source_row(
+                {
+                    "lista": "LISTA A",
+                    "voti_lista": "30",
+                    "elettori": "70",
+                    "votanti": "55",
+                    "voti_validi": "60",
+                },
+                row_number=4,
+                province="VITERBO",
+                municipality="VITERBO",
+            ),
+            source_row(
+                {
+                    "lista": "LISTA A",
+                    "voti_lista": "25",
+                    "elettori": "60",
+                    "votanti": "45",
+                    "voti_validi": "50",
+                },
+                row_number=5,
+                region="LOMBARDIA",
+                province="MILANO",
+                municipality="MILANO",
+            ),
+        ],
+    )
+    monkeypatch.setattr(main, "database", database)
+    client = TestClient(main.app)
+
+    response = client.get(
+        "/api/v1/history/coverage/national",
+        params={"category": "camera", "year": 1994},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 3
+    assert {row["comune"] for row in payload["rows"]} == {
+        "ROMA",
+        "VITERBO",
+        "MILANO",
+    }
+    roma = next(row for row in payload["rows"] if row["comune"] == "ROMA")
+    assert roma["regione"] == "LAZIO"
+    assert roma["collegio"] == "ROMA 1"
+    assert roma["righe"] == 2
+    assert roma["soggetti"] == 2
+    assert roma["file_count"] == 2
+
+    csv_response = client.get(
+        "/api/v1/history/coverage/national.csv",
+        params={"category": "camera", "comune": "ROMA"},
+    )
+    assert csv_response.status_code == 200
+    assert "TIPO_ELEZIONE;DATA;LIVELLO;REGIONE" in csv_response.text
+    assert ";LAZIO;;ROMA;" in csv_response.text
+
+
 def test_municipality_audit_reconstructs_split_colleges(
     tmp_path, monkeypatch
 ) -> None:

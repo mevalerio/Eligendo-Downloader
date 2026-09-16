@@ -47,6 +47,43 @@ The eight `TIPO_ELEZIONE` values are `assemblea_costituente`, `camera`,
 The observational unit varies with the published source geography. Geography
 fields should therefore be retained when aggregating rows.
 
+## National-election geography coverage
+
+The `/api/v1/history/coverage/national` endpoint and its `.csv` equivalent
+provide a sense-check table for the five national categories. The observational
+unit is an imported election, geography, college, round, and question. Several
+rows for one municipality are therefore expected when a law divides it across
+electoral colleges. Results from multiple source members are collapsed into one
+geography row and retained in `FONTE_FILE`.
+
+| CSV field | JSON field | Type | Definition |
+|---|---|---|---|
+| `TIPO_ELEZIONE` | `tipo_elezione` | text | National election category |
+| `DATA` | `data` | ISO date | Election date |
+| `LIVELLO` | `livello` | text | `comune`, `provincia`, `regione`, `nazione`, or `nazionale` |
+| `REGIONE` | `regione` | text or null | Region published by the source |
+| `CIRCOSCRIZIONE` | `circoscrizione` | text or null | Electoral constituency |
+| `PROVINCIA` | `provincia` | text or null | Province |
+| `COMUNE` | `comune` | text or null | Canonical municipality, where available |
+| `NAZIONE` | `nazione` | text or null | Country for overseas records |
+| `COLLEGIO` | `collegio` | text or null | Uninominal/plurinominal college or retained historical subdivision |
+| `TURNO` | `turno` | integer or null | Ballot round |
+| `NUMERO_QUESITO` | `numero_quesito` | text or null | Referendum question number |
+| `RIGHE` | `righe` | integer | Normalised result rows represented by the coverage row |
+| `SOGGETTI` | `soggetti` | integer | Distinct result subjects represented |
+| `ELETTORI` | `elettori` | integer or null | Maximum registered-elector value in the group |
+| `VOTANTI` | `votanti` | integer or null | Maximum voter value in the group |
+| `VOTI_VALIDI` | `voti_validi` | integer or null | Maximum valid-vote value in the group |
+| `FONTE_FILE` | `fonte_file` | text | Member file names represented by the row, comma-separated |
+| `FONTE_FILE_COUNT` | `file_count` | integer | Number of distinct source members represented |
+| `FONTE_URL` | `fonte_url` | URL | Official archive URL |
+| `SHA256` | `sha256` | text | Digest of the imported archive |
+
+The JSON endpoint accepts `category`, `year`, `election_date`, `regione`,
+`provincia`, and `comune` filters, together with `limit` and `offset`. The CSV
+endpoint accepts the same filters except pagination and streams every matching
+row with a UTF-8 byte-order mark and semicolon delimiter.
+
 ## Compact municipal result
 
 | CSV field | JSON field | Type | Definition |

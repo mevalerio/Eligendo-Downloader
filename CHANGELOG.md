@@ -4,6 +4,10 @@ All notable project changes are documented in this file.
 
 ## Unreleased
 
+- Added JSON and streaming CSV national-election geography coverage tables,
+  grouped by election, region, municipality, college, and source file for
+  sense-checking historical geographic coverage.
+
 ## 2.2.0
 
 - Added a downloadable, hashed catalogue of 19 principal national electoral

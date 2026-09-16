@@ -216,6 +216,36 @@ class ElectionResultsResponse(BaseModel):
     rows: list[ElectionResultRow]
 
 
+class NationalGeographyRow(BaseModel):
+    tipo_elezione: str
+    data: date
+    livello: Literal["comune", "provincia", "regione", "nazione", "nazionale"]
+    regione: str | None = None
+    circoscrizione: str | None = None
+    provincia: str | None = None
+    comune: str | None = None
+    nazione: str | None = None
+    collegio: str | None = None
+    turno: int | None = None
+    numero_quesito: str | None = None
+    righe: int
+    soggetti: int
+    elettori: int | None = None
+    votanti: int | None = None
+    voti_validi: int | None = None
+    fonte_file: str
+    file_count: int
+    fonte_url: str
+    sha256: str
+
+
+class NationalGeographyResponse(BaseModel):
+    count: int
+    limit: int
+    offset: int
+    rows: list[NationalGeographyRow]
+
+
 class MunicipalityCoverageRow(BaseModel):
     tipo_elezione: str
     data: date
