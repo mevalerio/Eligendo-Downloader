@@ -17,6 +17,17 @@ class ElectoralLaw:
     file_format: str
 
 
+@dataclass(frozen=True)
+class DistrictMapVersion:
+    id: str
+    category: str
+    start_year: int
+    end_year: int
+    geography_level: str
+    source_ids: tuple[str, ...]
+    notes: str
+
+
 def _gazette(code: str, year: int, month: int, day: int) -> str:
     return (
         "https://www.gazzettaufficiale.it/atto/vediMenuHTML?"
@@ -88,6 +99,30 @@ ELECTORAL_LAWS = (
         "html",
     ),
     ElectoralLaw(
+        "camera-1953-148",
+        "1953-03-31",
+        "Law 31 March 1953, no. 148",
+        "Amendments to the Chamber electoral law without general redistricting",
+        "electoral_law",
+        ("camera",),
+        "1953",
+        _gazette("053U0148", 1953, 3, 31),
+        _gazette("053U0148", 1953, 3, 31),
+        "html",
+    ),
+    ElectoralLaw(
+        "camera-boundaries-1956-493",
+        "1956-05-16",
+        "Law 16 May 1956, no. 493",
+        "Chamber territorial amendment adding the Trieste constituency",
+        "boundary_correction",
+        ("camera",),
+        "1958-1992",
+        _gazette("056U0493", 1956, 6, 12),
+        _gazette("056U0493", 1956, 6, 12),
+        "html",
+    ),
+    ElectoralLaw(
         "camera-1957-361",
         "1957-03-30",
         "D.P.R. 30 March 1957, no. 361",
@@ -112,6 +147,18 @@ ELECTORAL_LAWS = (
         "html",
     ),
     ElectoralLaw(
+        "senato-boundaries-1963-55",
+        "1963-02-14",
+        "Law 14 February 1963, no. 55",
+        "Revision of Senate colleges in Friuli-Venezia Giulia",
+        "boundary_correction",
+        ("senato",),
+        "1963-1987",
+        _gazette("063U0055", 1963, 2, 15),
+        _gazette("063U0055", 1963, 2, 15),
+        "html",
+    ),
+    ElectoralLaw(
         "european-1979-18",
         "1979-01-24",
         "Law 24 January 1979, no. 18",
@@ -133,6 +180,18 @@ ELECTORAL_LAWS = (
         "1970-present, as amended",
         _gazette("070U0352", 1970, 6, 15),
         _gazette("070U0352", 1970, 6, 15),
+        "html",
+    ),
+    ElectoralLaw(
+        "senato-boundaries-1991-422",
+        "1991-12-30",
+        "Law 30 December 1991, no. 422",
+        "Revision of the six Senate colleges in Trentino-Alto Adige",
+        "boundary_correction",
+        ("senato",),
+        "1992-2013 special regional regime",
+        _gazette("092G0002", 1992, 1, 4),
+        _gazette("092G0002", 1992, 1, 4),
         "html",
     ),
     ElectoralLaw(
@@ -196,6 +255,30 @@ ELECTORAL_LAWS = (
         "pdf",
     ),
     ElectoralLaw(
+        "senato-boundaries-1993-535-correction",
+        "1993-12-31",
+        "Errata corrige to Legislative Decree 20 December 1993, no. 535",
+        "Corrections to the Senate single-member college table",
+        "boundary_correction",
+        ("senato",),
+        "1994-2001",
+        _gazette("093A7407", 1993, 12, 31),
+        _gazette("093A7407", 1993, 12, 31),
+        "html",
+    ),
+    ElectoralLaw(
+        "camera-boundaries-1993-536-correction",
+        "1994-01-13",
+        "Errata corrige to Legislative Decree 20 December 1993, no. 536",
+        "Corrections to the Chamber single-member college table",
+        "boundary_correction",
+        ("camera",),
+        "1994-2001",
+        _gazette("094A0228", 1994, 1, 13),
+        _gazette("094A0228", 1994, 1, 13),
+        "html",
+    ),
+    ElectoralLaw(
         "parliament-2005-270",
         "2005-12-21",
         "Law 21 December 2005, no. 270",
@@ -232,6 +315,30 @@ ELECTORAL_LAWS = (
         "pdf",
     ),
     ElectoralLaw(
+        "parliament-boundaries-2017-189-correction-1",
+        "2017-12-20",
+        "Correction notice 20 December 2017 to Legislative Decree no. 189",
+        "First official correction to the 2018 college instrument",
+        "boundary_correction",
+        ("camera", "senato"),
+        "2018",
+        _gazette("17A08633", 2017, 12, 20),
+        _gazette("17A08633", 2017, 12, 20),
+        "html",
+    ),
+    ElectoralLaw(
+        "parliament-boundaries-2017-189-correction-2",
+        "2018-01-12",
+        "Correction notice 12 January 2018 to Legislative Decree no. 189",
+        "Territorial correction adding Villetta Barrea to the published table",
+        "boundary_correction",
+        ("camera", "senato"),
+        "2018",
+        _gazette("18A00307", 2018, 1, 12),
+        _gazette("18A00307", 2018, 1, 12),
+        "html",
+    ),
+    ElectoralLaw(
         "parliament-2019-51",
         "2019-05-27",
         "Law 27 May 2019, no. 51",
@@ -261,13 +368,163 @@ ELECTORAL_LAWS = (
 LAW_BY_ID = {law.id: law for law in ELECTORAL_LAWS}
 
 
+DISTRICT_MAP_VERSIONS = (
+    DistrictMapVersion(
+        "camera-1948-table-a",
+        "camera",
+        1948,
+        1953,
+        "circoscrizione",
+        ("camera-1948-26", "camera-1953-148"),
+        "The 1953 law changed seat allocation, not the general territorial map.",
+    ),
+    DistrictMapVersion(
+        "camera-1958-table-a-trieste",
+        "camera",
+        1958,
+        1992,
+        "circoscrizione",
+        ("camera-boundaries-1956-493", "camera-1957-361"),
+        "The consolidated Table A includes the Trieste territorial amendment.",
+    ),
+    DistrictMapVersion(
+        "senato-1948-corrected",
+        "senato",
+        1948,
+        1958,
+        "collegio_uninominale",
+        ("senato-boundaries-1948-30", "senato-boundaries-1948-84"),
+        "The original municipality-to-college table must be read with DPR 84/1948.",
+    ),
+    DistrictMapVersion(
+        "senato-1963-friuli",
+        "senato",
+        1963,
+        1987,
+        "collegio_uninominale",
+        (
+            "senato-boundaries-1948-30",
+            "senato-boundaries-1948-84",
+            "senato-boundaries-1963-55",
+        ),
+        "The 1963 law replaces the Friuli-Venezia Giulia portion of the map.",
+    ),
+    DistrictMapVersion(
+        "senato-1992-trentino",
+        "senato",
+        1992,
+        1992,
+        "collegio_uninominale",
+        (
+            "senato-boundaries-1948-30",
+            "senato-boundaries-1948-84",
+            "senato-boundaries-1963-55",
+            "senato-boundaries-1991-422",
+        ),
+        "The 1991 law replaces the six Trentino-Alto Adige colleges.",
+    ),
+    DistrictMapVersion(
+        "camera-mattarellum-1993-corrected",
+        "camera",
+        1994,
+        2001,
+        "collegio_uninominale",
+        (
+            "camera-boundaries-1993-536",
+            "camera-boundaries-1993-536-correction",
+        ),
+        "The 1993 decree is applied together with its January 1994 errata corrige.",
+    ),
+    DistrictMapVersion(
+        "senato-mattarellum-1993-corrected",
+        "senato",
+        1994,
+        2001,
+        "collegio_uninominale",
+        (
+            "senato-boundaries-1993-535",
+            "senato-boundaries-1993-535-correction",
+            "senato-boundaries-1991-422",
+        ),
+        "The corrected decree applies nationally; the 1991 Trentino map remains relevant.",
+    ),
+    DistrictMapVersion(
+        "camera-porcellum-table-a",
+        "camera",
+        2006,
+        2013,
+        "circoscrizione",
+        ("camera-1957-361", "parliament-2005-270"),
+        "The system uses the Chamber constituencies in Table A, without Mattarellum colleges.",
+    ),
+    DistrictMapVersion(
+        "senato-porcellum-regions",
+        "senato",
+        2006,
+        2013,
+        "regione",
+        ("parliament-2005-270", "senato-boundaries-1991-422"),
+        "Regions are the general unit; the six Trentino-Alto Adige colleges persist.",
+    ),
+    DistrictMapVersion(
+        "parliament-rosatellum-2017-corrected",
+        "camera",
+        2018,
+        2018,
+        "collegio_uninominale_e_plurinominale",
+        (
+            "parliament-boundaries-2017-189",
+            "parliament-boundaries-2017-189-correction-1",
+            "parliament-boundaries-2017-189-correction-2",
+        ),
+        "Tables A.1/A.2 are applied with both official correction notices.",
+    ),
+    DistrictMapVersion(
+        "parliament-rosatellum-2017-corrected",
+        "senato",
+        2018,
+        2018,
+        "collegio_uninominale_e_plurinominale",
+        (
+            "parliament-boundaries-2017-189",
+            "parliament-boundaries-2017-189-correction-1",
+            "parliament-boundaries-2017-189-correction-2",
+        ),
+        "Tables B.1/B.2 are applied with both official correction notices.",
+    ),
+    DistrictMapVersion(
+        "parliament-rosatellum-2020",
+        "camera",
+        2022,
+        2100,
+        "collegio_uninominale_e_plurinominale",
+        ("parliament-boundaries-2020-177",),
+        "The 2020 decree supplies the post-reduction Chamber map.",
+    ),
+    DistrictMapVersion(
+        "parliament-rosatellum-2020",
+        "senato",
+        2022,
+        2100,
+        "collegio_uninominale_e_plurinominale",
+        ("parliament-boundaries-2020-177",),
+        "The 2020 decree supplies the post-reduction Senate map.",
+    ),
+)
+
+
+def district_map_for(category: str, year: int) -> DistrictMapVersion | None:
+    return next(
+        (
+            version
+            for version in DISTRICT_MAP_VERSIONS
+            if version.category == category
+            and version.start_year <= year <= version.end_year
+        ),
+        None,
+    )
+
+
 def boundary_source(category: str, year: int) -> str | None:
-    if category == "senato" and year <= 1992:
-        return "senato-boundaries-1948-30"
-    if category in {"camera", "senato"} and 1994 <= year <= 2001:
-        return f"{category}-boundaries-1993-{'536' if category == 'camera' else '535'}"
-    if category in {"camera", "senato"} and year == 2018:
-        return "parliament-boundaries-2017-189"
-    if category in {"camera", "senato"} and year >= 2022:
-        return "parliament-boundaries-2020-177"
-    return None
+    version = district_map_for(category, year)
+    return version.source_ids[0] if version else None

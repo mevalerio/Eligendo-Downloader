@@ -42,7 +42,9 @@ Official legal catalogue -> article/PDF downloader -> hashed local corpus
   aggregate section-only local archives to municipalities and canonicalises
   historical college-part labels.
 - `app/electoral_laws.py` records the applicable national electoral laws and
-  official college-boundary instruments by election regime.
+  official college-boundary instruments. District-map versions are selected
+  independently by chamber and year and compose base instruments, territorial
+  amendments, and errata corrige.
 - `app/scraper.py` parses election metadata, geography, summaries,
   candidates, lists, totals, votes, percentages, and seats from HTML pages.
 - `app/database.py` owns the SQLite schema, transactional replacement, and
@@ -81,6 +83,13 @@ canonicalised and the original subdivision is retained as the college.
 Section-only archives are grouped by
 municipality and result subject before insertion; their provenance uses a
 `#municipality-aggregate` source marker.
+
+Municipality reconstruction is a separate projection. It takes electors and
+voters once per distinct college fragment, sums the fragments to the canonical
+municipality, and retains the original college labels. The audit compares the
+reconstructed voters with the closest earlier and later elections of the same
+chamber under a configurable tolerance. Every output row carries the selected
+district-map version and links to all applicable official sources.
 
 The compact municipal export is a projection:
 

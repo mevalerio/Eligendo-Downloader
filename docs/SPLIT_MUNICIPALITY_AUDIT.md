@@ -7,11 +7,17 @@ election. It links each applicable election to the official college-boundary
 instrument and evaluates whether electoral-college fragments reconstruct a
 plausible municipality total.
 
-The legal corpus contains 19 principal post-war national electoral acts and
-boundary instruments. It includes the 1948 Senate boundary table, the 1993
-Chamber and Senate college decrees, and the 2017 and 2020 boundary decrees. The
-API downloads the official Gazzetta Ufficiale sources and records a SHA-256
-digest for every file.
+The legal corpus contains 27 principal post-war national electoral acts,
+boundary instruments, territorial amendments, and official corrections. It
+includes the 1948 Senate boundary table and correction, the 1956 Chamber and
+1963/1991 Senate changes, the corrected 1993 Chamber and Senate college
+decrees, and the 2017 and 2020 boundary decrees. The API downloads the official
+Gazzetta Ufficiale sources and records a SHA-256 digest for every file.
+
+Territorial versions are separate from electoral-law versions. The complete
+period table and clickable official sources are in
+[District-map versions](DISTRICT_MAP_VERSIONS.md) and are returned by
+`/api/v1/legal/district-maps`.
 
 ## Municipality and college normalisation
 
@@ -20,7 +26,8 @@ The importer recognises:
 - named fragments such as `Roma - Appio Latino`;
 - centre and directional labels such as `Messina centro storico`,
   `Firenze Nord`, and `Palermo Sud`;
-- numbered or zonal labels; and
+- Arabic- or Roman-numbered and zonal labels;
+- official `Municipio` and `Quartiere` labels; and
 - explicit archive markers such as `Parte di Comune TARANTO`,
   `PARTE DI COMUNE DI ROMA`, and `parte del comune di Trieste`.
 
@@ -35,14 +42,19 @@ audit takes electors and voters once and sums result votes across parties or
 candidates. It then sums the college fragments to municipality level. The best
 complete result layer is selected for each election.
 
-The selected row is compared with the nearest same-category election that has
-electorate data. An election is:
+The selected row is compared with the closest earlier and later elections of
+the same chamber that have voter data. The default tolerance is 35 per cent,
+so each reconstructed voter ratio must lie within 0.65-1.35. The response also
+retains the nearest-election electorate comparison for continuity. An election
+is:
 
 - `invalid` when votes exceed electors by more than 2%, voters exceed electors
   by more than 1%, or votes exceed voters by more than 2%;
-- `warning` when votes/electors fall outside 0.20–1.02 or the electorate is
-  outside 0.65–1.35 of the nearest same-category election;
-- `insufficient_data` when the source omits an electorate or reference; and
+- `warning` when votes/electors fall outside 0.20-1.02, the electorate is
+  outside 0.65-1.35 of the nearest same-category election, or either adjacent
+  voter ratio falls outside the configured tolerance;
+- `insufficient_data` when the source omits the required electorate/voter data
+  or no adjacent voter reference is available; and
 - `pass` otherwise.
 
 The comparison is a sense check. It does not replace legal-boundary research
@@ -62,14 +74,15 @@ more than one college fragment.
 
 | Status | Rows |
 |---|---:|
-| Pass | 985 |
-| Warning | 5 |
+| Pass | 982 |
+| Warning | 8 |
 | Invalid | 3 |
 | Insufficient data | 27 |
 
-The warnings were Reggio Calabria (Chamber 2001), Cagliari (Senate 1948), and
-Padova (Chamber 1992, 1994 and 1996). These rows are arithmetically coherent but
-their electorate differs substantially from the nearest comparison election.
+The warnings were Reggio Calabria (Chamber 2001), Cagliari (Senate 1948 and
+1958), Palermo (Senate 1958), Padova (Chamber 1992, 1994 and 1996), and Rome
+(Senate 1958). These rows are arithmetically coherent but their electorate or
+voter totals differ substantially from an adjacent comparison election.
 
 The invalid rows were:
 
@@ -89,11 +102,12 @@ publish municipality-level electors or voters, notably the 2006 Senate files.
 
 ## Rome result
 
-Rome appears in 38 Chamber/Senate election checks: 35 pass, the 1948 and 1953
-Senate rows are invalid for the reasons above, and the 2006 Senate row has
-insufficient electorate metadata. The 2018 and 2022 rows reconstruct 11 and 7
-Chamber parts, and 5 and 3 Senate parts, respectively; all four pass the vote
-and nearest-electorate checks.
+Rome appears in 38 Chamber/Senate election checks: 34 pass, the 1948 and 1953
+Senate rows are invalid for the reasons above, the 1958 Senate row is a voter
+comparison warning, and the 2006 Senate row has insufficient electorate and
+voter metadata. The 2018 and 2022 rows reconstruct 11 and 7 Chamber parts, and
+5 and 3 Senate parts, respectively; all four pass the arithmetic and adjacent-
+election voter checks.
 
 ## Reproduction
 
@@ -103,6 +117,8 @@ After importing the national history, request:
 GET /api/v1/history/audit/municipality?comune=ROMA
 ```
 
-Use `category=camera` or `category=senato` for a single chamber. The response
-includes every component total, ratio, status, and `fonte_confini_id` needed to
-review the result against the downloaded legal corpus.
+Use `category=camera` or `category=senato` for a single chamber. Set
+`tolleranza_votanti` to change the default 0.35 threshold. The response includes
+the previous and following voter references, every component total, ratio and
+status, `mappa_collegi_versione`, and all `fonti_confini_urls` needed to review
+the result against the downloaded legal corpus.

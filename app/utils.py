@@ -71,7 +71,11 @@ def canonical_municipality(value: str | None) -> str | None:
             or folded.startswith(f"{base} est")
             or folded.startswith(f"{base} ovest")
             or folded.startswith(f"{base} zona ")
+            or folded.startswith(f"{base}: municipio ")
+            or folded.startswith(f"{base}: quartiere ")
+            or folded.startswith(f"{base}: zona ")
             or re.fullmatch(rf"{re.escape(base)}\s+\d+", folded)
+            or re.fullmatch(rf"{re.escape(base)}\s+[ivxlcdm]+", folded)
         ):
             return municipality
     return cleaned

@@ -2,6 +2,7 @@ import io
 import zipfile
 
 from app.archive import parse_zip_archive
+from app.utils import canonical_municipality, slug
 
 
 def test_archive_parser() -> None:
@@ -107,6 +108,18 @@ def test_historical_rome_constituency_is_canonicalised_as_municipality() -> None
     assert rows[0].municipality == "ROMA"
     assert rows[0].municipality_key == "roma"
     assert rows[0].payload["collegio"] == "Roma - Appio Latino"
+
+
+def test_official_submunicipal_labels_are_canonicalised() -> None:
+    for label, expected in (
+        ("TRIESTE II", "TRIESTE"),
+        ("Roma: Municipio XIV", "ROMA"),
+        ("Napoli: Quartiere 19 - Fuorigrotta", "NAPOLI"),
+        ("Genova: Municipio VII - Ponente", "GENOVA"),
+    ):
+        municipality = canonical_municipality(label)
+        assert municipality == expected
+        assert slug(municipality) == expected.casefold()
 
 
 def test_other_historical_split_cities_are_canonicalised() -> None:

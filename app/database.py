@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .archive import ArchiveRow
-from .electoral_laws import boundary_source
+from .electoral_laws import LAW_BY_ID, boundary_source, district_map_for
 from .history import normalise_history_results
 from .schemas import CatalogueEntry, PageResult
 from .utils import canonical_municipality, slug
@@ -839,7 +839,12 @@ class Database:
         *,
         municipality: str,
         categories: tuple[str, ...] = ("camera", "senato"),
+        voter_tolerance: float = 0.35,
     ) -> list[dict[str, Any]]:
+        if not 0 <= voter_tolerance < 1:
+            raise ValueError(
+                "voter_tolerance must be greater than or equal to 0 and below 1."
+            )
         municipality_key = slug(municipality)
         placeholders = ",".join("?" for _ in categories)
         legacy_keys = (
@@ -952,7 +957,10 @@ class Database:
                 )
             )
 
-        dated = [(date.fromisoformat(row["data"]), row) for row in selected]
+        dated = sorted(
+            [(date.fromisoformat(row["data"]), row) for row in selected],
+            key=lambda item: (item[0], item[1]["tipo_elezione"]),
+        )
         for current_date, row in dated:
             electors = row["aventi_diritto"]
             voters = row["votanti"]
@@ -979,24 +987,77 @@ class Database:
                 if electors is not None:
                     reference_ratio = round(electors / reference_electors, 6)
 
-            if electors in (None, 0) or reference_electors is None:
-                status = "insufficient_data"
-            elif (
-                votes > electors * 1.02
-                or (voters is not None and voters > electors * 1.01)
-                or (voters is not None and votes > voters * 1.02)
+            voter_references = [
+                (other_date, other)
+                for other_date, other in dated
+                if other is not row
+                and other["tipo_elezione"] == row["tipo_elezione"]
+                and other["votanti"] not in (None, 0)
+            ]
+            previous = [item for item in voter_references if item[0] < current_date]
+            following = [item for item in voter_references if item[0] > current_date]
+            previous_date, previous_row = max(previous, default=(None, None))
+            next_date, next_row = min(following, default=(None, None))
+            previous_voters = (
+                int(previous_row["votanti"]) if previous_row is not None else None
+            )
+            next_voters = int(next_row["votanti"]) if next_row is not None else None
+            previous_voter_ratio = (
+                round(voters / previous_voters, 6)
+                if voters not in (None, 0) and previous_voters not in (None, 0)
+                else None
+            )
+            next_voter_ratio = (
+                round(voters / next_voters, 6)
+                if voters not in (None, 0) and next_voters not in (None, 0)
+                else None
+            )
+            voter_ratios = [
+                ratio
+                for ratio in (previous_voter_ratio, next_voter_ratio)
+                if ratio is not None
+            ]
+            voters_comparable = (
+                all(
+                    1 - voter_tolerance <= ratio <= 1 + voter_tolerance
+                    for ratio in voter_ratios
+                )
+                if voter_ratios
+                else None
+            )
+
+            votes_exceed_electors = (
+                electors not in (None, 0) and votes > electors * 1.02
+            )
+            voters_exceed_electors = (
+                electors not in (None, 0)
+                and voters is not None
+                and voters > electors * 1.01
+            )
+            votes_exceed_voters = voters is not None and votes > voters * 1.02
+            if (
+                votes_exceed_electors
+                or voters_exceed_electors
+                or votes_exceed_voters
             ):
                 status = "invalid"
+            elif electors in (None, 0) or voters in (None, 0) or not voter_ratios:
+                status = "insufficient_data"
             elif (
                 vote_ratio is None
                 or not 0.2 <= vote_ratio <= 1.02
-                or reference_ratio is None
-                or not 0.65 <= reference_ratio <= 1.35
+                or (
+                    reference_ratio is not None
+                    and not 0.65 <= reference_ratio <= 1.35
+                )
+                or voters_comparable is False
             ):
                 status = "warning"
             else:
                 status = "pass"
 
+            map_version = district_map_for(row["tipo_elezione"], current_date.year)
+            source_ids = list(map_version.source_ids) if map_version else []
             row.update(
                 {
                     "rapporto_voti_aventi_diritto": vote_ratio,
@@ -1005,6 +1066,21 @@ class Database:
                     ),
                     "aventi_diritto_riferimento": reference_electors,
                     "rapporto_aventi_diritto_riferimento": reference_ratio,
+                    "data_precedente": (
+                        previous_date.isoformat() if previous_date else None
+                    ),
+                    "votanti_precedenti": previous_voters,
+                    "rapporto_votanti_precedenti": previous_voter_ratio,
+                    "data_successiva": next_date.isoformat() if next_date else None,
+                    "votanti_successivi": next_voters,
+                    "rapporto_votanti_successivi": next_voter_ratio,
+                    "tolleranza_votanti": voter_tolerance,
+                    "votanti_comparabili": voters_comparable,
+                    "mappa_collegi_versione": map_version.id if map_version else None,
+                    "fonti_confini_ids": source_ids,
+                    "fonti_confini_urls": [
+                        LAW_BY_ID[source_id].source_url for source_id in source_ids
+                    ],
                     "fonte_confini_id": boundary_source(
                         row["tipo_elezione"], current_date.year
                     ),

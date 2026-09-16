@@ -14,7 +14,7 @@ from .archive import parse_zip_archive
 from .catalogue import CATALOGUE_URL, catalogue_matches, parse_catalogue_html
 from .config import Settings
 from .database import Database
-from .electoral_laws import ELECTORAL_LAWS, LAW_BY_ID
+from .electoral_laws import DISTRICT_MAP_VERSIONS, ELECTORAL_LAWS, LAW_BY_ID
 from .history import ELECTION_CATEGORIES
 from .http_client import Download, SafeHttpClient
 from .schemas import (
@@ -89,6 +89,31 @@ class EligendoService:
                     "file_format": law.file_format,
                     "downloaded": path.exists(),
                     "local_path": str(path) if path.exists() else None,
+                }
+            )
+        return rows
+
+    def district_maps(
+        self, *, category: str | None = None, year: int | None = None
+    ) -> list[dict[str, object]]:
+        rows: list[dict[str, object]] = []
+        for version in DISTRICT_MAP_VERSIONS:
+            if category is not None and version.category != category:
+                continue
+            if year is not None and not version.start_year <= year <= version.end_year:
+                continue
+            sources = [LAW_BY_ID[source_id] for source_id in version.source_ids]
+            rows.append(
+                {
+                    "id": version.id,
+                    "category": version.category,
+                    "start_year": version.start_year,
+                    "end_year": version.end_year,
+                    "geography_level": version.geography_level,
+                    "source_ids": list(version.source_ids),
+                    "source_citations": [source.citation for source in sources],
+                    "source_urls": [source.source_url for source in sources],
+                    "notes": version.notes,
                 }
             )
         return rows

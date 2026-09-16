@@ -288,6 +288,18 @@ class ElectoralLawEntry(BaseModel):
     local_path: str | None = None
 
 
+class DistrictMapVersionEntry(BaseModel):
+    id: str
+    category: Literal["camera", "senato"]
+    start_year: int
+    end_year: int
+    geography_level: str
+    source_ids: list[str]
+    source_citations: list[str]
+    source_urls: list[str]
+    notes: str
+
+
 class ElectoralLawDownloadRequest(BaseModel):
     ids: list[str] | None = None
     overwrite: bool = False
@@ -323,6 +335,17 @@ class MunicipalityAuditRow(BaseModel):
     data_riferimento: date | None = None
     aventi_diritto_riferimento: int | None = None
     rapporto_aventi_diritto_riferimento: float | None = None
+    data_precedente: date | None = None
+    votanti_precedenti: int | None = None
+    rapporto_votanti_precedenti: float | None = None
+    data_successiva: date | None = None
+    votanti_successivi: int | None = None
+    rapporto_votanti_successivi: float | None = None
+    tolleranza_votanti: float
+    votanti_comparabili: bool | None = None
+    mappa_collegi_versione: str | None = None
+    fonti_confini_ids: list[str]
+    fonti_confini_urls: list[str]
     fonte_confini_id: str | None = None
     stato: Literal["pass", "warning", "invalid", "insufficient_data"]
 
@@ -330,6 +353,7 @@ class MunicipalityAuditRow(BaseModel):
 class MunicipalityAuditResponse(BaseModel):
     comune: str
     categories: list[str]
+    voter_tolerance: float
     elections_checked: int
     passed: int
     warnings: int
