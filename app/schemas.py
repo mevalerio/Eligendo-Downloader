@@ -48,6 +48,70 @@ class PageRequest(BaseModel):
     store: bool = False
 
 
+class OfficialMunicipalityVerificationRequest(BaseModel):
+    url: HttpUrl
+    store: bool = True
+    relative_tolerance: float = Field(default=0.0, ge=0.0, le=0.10)
+    complete_set: bool = False
+
+
+class OfficialMunicipalityPagesVerificationRequest(BaseModel):
+    urls: list[HttpUrl] = Field(min_length=1)
+    store: bool = True
+    relative_tolerance: float = Field(default=0.0, ge=0.0, le=0.10)
+    complete_set: bool = False
+
+
+class OfficialValueComparison(BaseModel):
+    campo: Literal["aventi_diritto", "votanti", "voti_validi"]
+    ufficiale: int | None = None
+    ricostruito: int | None = None
+    scarto: int | None = None
+    scarto_relativo: float | None = None
+    coincide: bool | None = None
+
+
+class OfficialPartyComparison(BaseModel):
+    partito_ufficiale: str | None = None
+    partito_ricostruito: str | None = None
+    voti_ufficiali: int | None = None
+    voti_ricostruiti: int | None = None
+    scarto: int | None = None
+    scarto_relativo: float | None = None
+    stato: Literal[
+        "match",
+        "within_tolerance",
+        "mismatch",
+        "missing_local",
+        "missing_official",
+    ]
+
+
+class OfficialMunicipalityVerificationResponse(BaseModel):
+    source_url: str
+    source_urls: list[str]
+    pagine_ufficiali: int
+    insieme_completo: bool
+    tipo_elezione: Literal["camera", "senato"]
+    data: date
+    regione: str | None = None
+    circoscrizione: str | None = None
+    provincia: str | None = None
+    comune: str
+    tolleranza_relativa: float
+    stato: Literal[
+        "exact_match",
+        "within_tolerance",
+        "mismatch",
+        "local_data_missing",
+    ]
+    riepilogo: list[OfficialValueComparison]
+    partiti_confrontati: int
+    partiti_coincidenti: int
+    partiti_non_coincidenti: int
+    partiti: list[OfficialPartyComparison]
+
+
 class CatalogueEntry(BaseModel):
     category: str
     year: int | None = None
@@ -331,6 +395,14 @@ class MunicipalityAuditRow(BaseModel):
     aventi_diritto: int | None = None
     votanti: int | None = None
     voti_risultato: int
+    fonte_aggregazione: Literal["open_data", "official_municipality_pages"]
+    aventi_diritto_open_data: int | None = None
+    votanti_open_data: int | None = None
+    voti_risultato_open_data: int | None = None
+    verifica_ufficiale_stato: str | None = None
+    verifica_ufficiale_pagine: int = 0
+    verifica_ufficiale_fonti: list[str]
+    verifica_ufficiale_data: datetime | None = None
     rapporto_voti_aventi_diritto: float | None = None
     data_riferimento: date | None = None
     aventi_diritto_riferimento: int | None = None

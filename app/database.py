@@ -141,6 +141,29 @@ CREATE TABLE IF NOT EXISTS page_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_snapshot_lookup
 ON page_snapshots(election_code, election_date, municipality);
+
+CREATE TABLE IF NOT EXISTS official_municipality_verifications (
+    id INTEGER PRIMARY KEY,
+    category TEXT NOT NULL,
+    election_date TEXT NOT NULL,
+    municipality TEXT NOT NULL,
+    municipality_key TEXT NOT NULL,
+    verified_at TEXT NOT NULL,
+    status TEXT NOT NULL,
+    complete_set INTEGER NOT NULL,
+    official_pages INTEGER NOT NULL,
+    official_electors INTEGER,
+    official_voters INTEGER,
+    official_valid_votes INTEGER,
+    source_urls_json TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    UNIQUE(category, election_date, municipality_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_official_verification_lookup
+ON official_municipality_verifications(
+    category, election_date, municipality_key
+);
 """
 
 
@@ -182,6 +205,84 @@ class Database:
             )
             connection.commit()
             return int(cursor.lastrowid)
+
+    def store_official_municipality_verification(
+        self, result: dict[str, Any]
+    ) -> int:
+        summary = {
+            row["campo"]: row["ufficiale"] for row in result["riepilogo"]
+        }
+        verified_at = datetime.now(timezone.utc).isoformat()
+        with closing(self.connect()) as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO official_municipality_verifications(
+                    category, election_date, municipality, municipality_key,
+                    verified_at, status, complete_set, official_pages, official_electors,
+                    official_voters, official_valid_votes, source_urls_json,
+                    payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(category, election_date, municipality_key) DO UPDATE SET
+                    municipality=excluded.municipality,
+                    verified_at=excluded.verified_at,
+                    status=excluded.status,
+                    complete_set=excluded.complete_set,
+                    official_pages=excluded.official_pages,
+                    official_electors=excluded.official_electors,
+                    official_voters=excluded.official_voters,
+                    official_valid_votes=excluded.official_valid_votes,
+                    source_urls_json=excluded.source_urls_json,
+                    payload_json=excluded.payload_json
+                """,
+                (
+                    result["tipo_elezione"],
+                    result["data"].isoformat(),
+                    result["comune"],
+                    slug(result["comune"]),
+                    verified_at,
+                    result["stato"],
+                    int(bool(result["insieme_completo"])),
+                    result["pagine_ufficiali"],
+                    summary.get("aventi_diritto"),
+                    summary.get("votanti"),
+                    summary.get("voti_validi"),
+                    json.dumps(result["source_urls"], ensure_ascii=False),
+                    json.dumps(result, ensure_ascii=False, default=str),
+                ),
+            )
+            connection.commit()
+            return int(cursor.lastrowid)
+
+    def official_municipality_verifications(
+        self,
+        *,
+        municipality: str,
+        categories: tuple[str, ...],
+    ) -> dict[tuple[str, str], dict[str, Any]]:
+        placeholders = ",".join("?" for _ in categories)
+        with closing(self.connect()) as connection:
+            rows = connection.execute(
+                f"""
+                SELECT *
+                FROM official_municipality_verifications
+                WHERE municipality_key = ?
+                  AND category IN ({placeholders})
+                """,
+                (slug(municipality), *categories),
+            ).fetchall()
+        return {
+            (row["category"], row["election_date"]): {
+                "stato": row["status"],
+                "insieme_completo": bool(row["complete_set"]),
+                "pagine": int(row["official_pages"]),
+                "aventi_diritto": row["official_electors"],
+                "votanti": row["official_voters"],
+                "voti_validi": row["official_valid_votes"],
+                "fonti": json.loads(row["source_urls_json"]),
+                "verificato_il": row["verified_at"],
+            }
+            for row in rows
+        }
 
     def replace_archive(
         self,
@@ -957,6 +1058,46 @@ class Database:
                 )
             )
 
+        official = self.official_municipality_verifications(
+            municipality=municipality,
+            categories=categories,
+        )
+        for row in selected:
+            verification = official.get(
+                (row["tipo_elezione"], row["data"])
+            )
+            row.update(
+                {
+                    "fonte_aggregazione": "open_data",
+                    "aventi_diritto_open_data": None,
+                    "votanti_open_data": None,
+                    "voti_risultato_open_data": None,
+                    "verifica_ufficiale_stato": (
+                        verification["stato"] if verification else None
+                    ),
+                    "verifica_ufficiale_pagine": (
+                        verification["pagine"] if verification else 0
+                    ),
+                    "verifica_ufficiale_fonti": (
+                        verification["fonti"] if verification else []
+                    ),
+                    "verifica_ufficiale_data": (
+                        verification["verificato_il"] if verification else None
+                    ),
+                }
+            )
+            if verification and verification["insieme_completo"]:
+                row["fonte_aggregazione"] = "official_municipality_pages"
+                row["aventi_diritto_open_data"] = row["aventi_diritto"]
+                row["votanti_open_data"] = row["votanti"]
+                row["voti_risultato_open_data"] = row["voti_risultato"]
+                if verification["aventi_diritto"] is not None:
+                    row["aventi_diritto"] = verification["aventi_diritto"]
+                if verification["votanti"] is not None:
+                    row["votanti"] = verification["votanti"]
+                if verification["voti_validi"] is not None:
+                    row["voti_risultato"] = verification["voti_validi"]
+
         dated = sorted(
             [(date.fromisoformat(row["data"]), row) for row in selected],
             key=lambda item: (item[0], item[1]["tipo_elezione"]),
@@ -1088,6 +1229,75 @@ class Database:
                 }
             )
         return sorted(selected, key=lambda row: (row["data"], row["tipo_elezione"]))
+
+    def municipality_party_totals(
+        self,
+        *,
+        municipality: str,
+        category: str,
+        election_date: date,
+        source_file: str,
+        result_type: str,
+    ) -> list[dict[str, Any]]:
+        """Aggregate one selected result layer across municipality fragments."""
+        municipality_key = slug(municipality)
+        legacy_keys = (
+            f"parte_di_comune_{municipality_key}",
+            f"parte_di_comune_di_{municipality_key}",
+            f"parte_del_comune_di_{municipality_key}",
+        )
+        if municipality_key == "reggio_calabria":
+            legacy_keys = (
+                *legacy_keys,
+                "parte_di_comune_reggio_di_calabria",
+                "parte_del_comune_di_reggio_di_calabria",
+            )
+        legacy_placeholders = ",".join("?" for _ in legacy_keys)
+        with closing(self.connect()) as connection:
+            rows = connection.execute(
+                f"""
+                SELECT municipality, subject, subject_key, votes
+                FROM election_results
+                WHERE (
+                    municipality_key = ?
+                    OR municipality_key LIKE ?
+                    OR municipality_key IN ({legacy_placeholders})
+                )
+                  AND category = ?
+                  AND election_date = ?
+                  AND source_file = ?
+                  AND result_type = ?
+                ORDER BY subject, municipality
+                """,
+                (
+                    municipality_key,
+                    f"{municipality_key}_%",
+                    *legacy_keys,
+                    category,
+                    election_date.isoformat(),
+                    source_file,
+                    result_type,
+                ),
+            ).fetchall()
+
+        totals: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            canonical = canonical_municipality(row["municipality"])
+            if slug(canonical or "") != municipality_key:
+                continue
+            key = row["subject_key"] or slug(row["subject"])
+            total = totals.setdefault(
+                key,
+                {
+                    "subject_key": key,
+                    "subject": row["subject"],
+                    "votes": 0,
+                    "parts": 0,
+                },
+            )
+            total["votes"] += int(row["votes"] or 0)
+            total["parts"] += 1
+        return sorted(totals.values(), key=lambda row: row["subject_key"])
 
     @staticmethod
     def _party_filters(

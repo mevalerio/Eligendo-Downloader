@@ -25,6 +25,10 @@ from .schemas import (
     PageResult,
 )
 from .scraper import parse_page_html
+from .utils import slug
+
+
+OFFICIAL_PAGE_CATEGORIES = {"C": "camera", "S": "senato"}
 
 
 class EligendoService:
@@ -69,6 +73,261 @@ class EligendoService:
         if store:
             self.database.store_snapshot(result)
         return result
+
+    @staticmethod
+    def _value_comparison(
+        field: str,
+        official: int | None,
+        reconstructed: int | None,
+        tolerance: float,
+    ) -> dict[str, object]:
+        if official is None or reconstructed is None:
+            return {
+                "campo": field,
+                "ufficiale": official,
+                "ricostruito": reconstructed,
+                "scarto": None,
+                "scarto_relativo": None,
+                "coincide": None,
+            }
+        difference = reconstructed - official
+        relative = abs(difference) / official if official else float(bool(difference))
+        return {
+            "campo": field,
+            "ufficiale": official,
+            "ricostruito": reconstructed,
+            "scarto": difference,
+            "scarto_relativo": round(relative, 8),
+            "coincide": relative <= tolerance,
+        }
+
+    def verify_official_municipality_page(
+        self,
+        url: str,
+        *,
+        store: bool = True,
+        relative_tolerance: float = 0.0,
+        complete_set: bool = False,
+    ) -> dict[str, object]:
+        """Compare reconstructed totals with an authoritative municipality page."""
+        return self.verify_official_municipality_pages(
+            [url],
+            store=store,
+            relative_tolerance=relative_tolerance,
+            complete_set=complete_set,
+        )
+
+    def verify_official_municipality_pages(
+        self,
+        urls: list[str],
+        *,
+        store: bool = True,
+        relative_tolerance: float = 0.0,
+        complete_set: bool = False,
+    ) -> dict[str, object]:
+        """Aggregate official split pages and compare them with local totals."""
+        unique_urls = list(dict.fromkeys(urls))
+        if not unique_urls:
+            raise ValueError("At least one official municipality URL is required.")
+        pages = [self.fetch_page(url, store=store) for url in unique_urls]
+        page = pages[0]
+        category = OFFICIAL_PAGE_CATEGORIES.get((page.election.code or "").upper())
+        if category is None:
+            raise ValueError(
+                "Official municipality verification currently supports Camera "
+                "and Senato pages."
+            )
+        municipality = page.geography.comune
+        if not municipality:
+            raise ValueError("The official URL must identify one municipality.")
+        for component in pages[1:]:
+            component_category = OFFICIAL_PAGE_CATEGORIES.get(
+                (component.election.code or "").upper()
+            )
+            if component_category != category:
+                raise ValueError("All official pages must use the same chamber.")
+            if component.election.date != page.election.date:
+                raise ValueError("All official pages must use the same election date.")
+            if slug(component.geography.comune or "") != slug(municipality):
+                raise ValueError("All official pages must identify the same municipality.")
+
+        audit_rows = self.database.municipality_election_audit(
+            municipality=municipality,
+            categories=(category,),
+        )
+        audit = next(
+            (
+                row
+                for row in audit_rows
+                if row["data"] == page.election.date.isoformat()
+            ),
+            None,
+        )
+
+        official_lists: dict[str, dict[str, object]] = {}
+        for component in pages:
+            for record in component.records:
+                if record.record_type != "list" or record.votes is None:
+                    continue
+                key = slug(record.name)
+                current = official_lists.setdefault(
+                    key,
+                    {"name": record.name, "votes": 0},
+                )
+                current["votes"] = int(current["votes"]) + record.votes
+
+        total_records = [
+            record.votes
+            for component in pages
+            for record in component.records
+            if record.record_type == "total" and record.votes is not None
+        ]
+        official_valid_votes = (
+            sum(total_records)
+            if total_records
+            else sum(int(row["votes"]) for row in official_lists.values())
+        )
+
+        def aggregate_summary(field: str) -> int | None:
+            values = [component.summary.get(field) for component in pages]
+            if not all(isinstance(value, (int, float)) for value in values):
+                return None
+            return sum(int(value) for value in values)
+
+        official_electors = aggregate_summary("elettori")
+        official_voters = aggregate_summary("votanti")
+
+        local_lists: dict[str, dict[str, object]] = {}
+        if audit is not None:
+            local_lists = {
+                row["subject_key"]: row
+                for row in self.database.municipality_party_totals(
+                    municipality=municipality,
+                    category=category,
+                    election_date=page.election.date,
+                    source_file=str(audit["fonte_file"]),
+                    result_type=str(audit["tipo_risultato"]),
+                )
+            }
+
+        comparisons = [
+            self._value_comparison(
+                "aventi_diritto",
+                official_electors,
+                int(audit["aventi_diritto"])
+                if audit is not None and audit["aventi_diritto"] is not None
+                else None,
+                relative_tolerance,
+            ),
+            self._value_comparison(
+                "votanti",
+                official_voters,
+                int(audit["votanti"])
+                if audit is not None and audit["votanti"] is not None
+                else None,
+                relative_tolerance,
+            ),
+            self._value_comparison(
+                "voti_validi",
+                official_valid_votes,
+                int(audit["voti_risultato"]) if audit is not None else None,
+                relative_tolerance,
+            ),
+        ]
+
+        parties: list[dict[str, object]] = []
+        for key in sorted(official_lists.keys() | local_lists.keys()):
+            official = official_lists.get(key)
+            local = local_lists.get(key)
+            official_votes = int(official["votes"]) if official else None
+            local_votes = int(local["votes"]) if local else None
+            if official is None:
+                party_status = "missing_official"
+                difference = None
+                relative = None
+            elif local is None:
+                party_status = "missing_local"
+                difference = None
+                relative = None
+            else:
+                difference = local_votes - official_votes
+                relative = (
+                    abs(difference) / official_votes
+                    if official_votes
+                    else float(bool(difference))
+                )
+                if difference == 0:
+                    party_status = "match"
+                elif relative <= relative_tolerance:
+                    party_status = "within_tolerance"
+                else:
+                    party_status = "mismatch"
+            parties.append(
+                {
+                    "partito_ufficiale": official["name"] if official else None,
+                    "partito_ricostruito": local["subject"] if local else None,
+                    "voti_ufficiali": official_votes,
+                    "voti_ricostruiti": local_votes,
+                    "scarto": difference,
+                    "scarto_relativo": round(relative, 8) if relative is not None else None,
+                    "stato": party_status,
+                }
+            )
+
+        party_matches = sum(
+            row["stato"] in ("match", "within_tolerance") for row in parties
+        )
+        party_mismatches = len(parties) - party_matches
+        if audit is None:
+            status = "local_data_missing"
+        elif party_mismatches or any(row["coincide"] is False for row in comparisons):
+            status = "mismatch"
+        elif any(row["stato"] == "within_tolerance" for row in parties) or any(
+            row["scarto"] not in (None, 0) for row in comparisons
+        ):
+            status = "within_tolerance"
+        else:
+            status = "exact_match"
+
+        verification = {
+            "source_url": page.source_url,
+            "source_urls": [component.source_url for component in pages],
+            "pagine_ufficiali": len(pages),
+            "insieme_completo": complete_set,
+            "tipo_elezione": category,
+            "data": page.election.date,
+            "regione": next(
+                (component.geography.regione for component in pages if component.geography.regione),
+                None,
+            ),
+            "circoscrizione": next(
+                (
+                    component.geography.circoscrizione
+                    for component in pages
+                    if component.geography.circoscrizione
+                ),
+                None,
+            ),
+            "provincia": next(
+                (
+                    component.geography.provincia
+                    for component in pages
+                    if component.geography.provincia
+                ),
+                None,
+            ),
+            "comune": municipality,
+            "tolleranza_relativa": relative_tolerance,
+            "stato": status,
+            "riepilogo": comparisons,
+            "partiti_confrontati": len(parties),
+            "partiti_coincidenti": party_matches,
+            "partiti_non_coincidenti": party_mismatches,
+            "partiti": parties,
+        }
+        if store:
+            self.database.store_official_municipality_verification(verification)
+        return verification
 
     def electoral_laws(self) -> list[dict[str, object]]:
         law_dir = self.settings.data_dir / "electoral_laws"

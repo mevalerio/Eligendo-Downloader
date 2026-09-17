@@ -1,12 +1,15 @@
-from datetime import date
+from datetime import date, datetime, timezone
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from app import main
 from app.archive import ArchiveRow
+from app.config import Settings
 from app.database import Database
 from app.history import normalise_history_results
-from app.schemas import CatalogueEntry
+from app.schemas import CatalogueEntry, ElectionInfo, Geography, PageResult, ResultRecord
+from app.service import EligendoService
 
 
 def source_row(
@@ -671,3 +674,180 @@ def test_municipality_audit_reads_legacy_reggio_di_calabria_label(tmp_path) -> N
     )
 
     assert len(rows) == 1
+
+
+def test_official_municipality_page_verifies_split_party_totals(
+    tmp_path, monkeypatch
+) -> None:
+    database = Database(tmp_path / "official-page.sqlite3")
+    rows = []
+    for municipality, electors, voters, party_a, party_b, row_number in (
+        ("ROMA I", 500, 450, 100, 200, 2),
+        ("ROMA II", 600, 500, 150, 250, 4),
+    ):
+        rows.extend(
+            [
+                source_row(
+                    {
+                        "collegio": municipality,
+                        "lista": party,
+                        "voti_lista": str(votes),
+                        "elettori": str(electors),
+                        "votanti": str(voters),
+                    },
+                    row_number=row_number + offset,
+                    municipality=municipality,
+                )
+                for offset, (party, votes) in enumerate(
+                    (("LISTA A", party_a), ("LISTA B", party_b))
+                )
+            ]
+        )
+    database.replace_archive(
+        entry("camera", date(1958, 5, 25), "camera-19580525.zip"),
+        sha256="official-page",
+        rows=rows,
+    )
+
+    settings = Settings(
+        data_dir=Path(tmp_path),
+        database_path=tmp_path / "official-page.sqlite3",
+        request_interval_seconds=0,
+        request_timeout_seconds=1,
+        catalogue_ttl_seconds=60,
+        max_archive_bytes=1024,
+        max_uncompressed_bytes=1024,
+    )
+    service = EligendoService(settings, database)
+    official_page = PageResult(
+        source_url="https://elezionistorico.interno.gov.it/index.php?tpel=C",
+        retrieved_at=datetime.now(timezone.utc),
+        election=ElectionInfo(code="C", name="Camera", date=date(1958, 5, 25)),
+        geography=Geography(
+            regione="LAZIO",
+            provincia="ROMA",
+            comune="ROMA",
+        ),
+        summary={"elettori": 1100, "votanti": 950},
+        records=[
+            ResultRecord(record_type="list", name="LISTA A", votes=250),
+            ResultRecord(record_type="list", name="LISTA B", votes=450),
+            ResultRecord(record_type="total", name="TOTALI", votes=700),
+        ],
+    )
+    monkeypatch.setattr(service, "fetch_page", lambda url, store: official_page)
+    monkeypatch.setattr(main, "service", service)
+
+    response = TestClient(main.app).post(
+        "/api/v1/history/audit/official-municipality-page",
+        json={
+            "url": official_page.source_url,
+            "store": False,
+            "relative_tolerance": 0,
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["stato"] == "exact_match"
+    assert result["partiti_confrontati"] == 2
+    assert result["partiti_coincidenti"] == 2
+    assert result["partiti_non_coincidenti"] == 0
+    assert result["pagine_ufficiali"] == 1
+    assert result["riepilogo"] == [
+        {
+            "campo": "aventi_diritto",
+            "ufficiale": 1100,
+            "ricostruito": 1100,
+            "scarto": 0,
+            "scarto_relativo": 0.0,
+            "coincide": True,
+        },
+        {
+            "campo": "votanti",
+            "ufficiale": 950,
+            "ricostruito": 950,
+            "scarto": 0,
+            "scarto_relativo": 0.0,
+            "coincide": True,
+        },
+        {
+            "campo": "voti_validi",
+            "ufficiale": 700,
+            "ricostruito": 700,
+            "scarto": 0,
+            "scarto_relativo": 0.0,
+            "coincide": True,
+        },
+    ]
+
+    component_urls = [
+        "https://elezionistorico.interno.gov.it/index.php?tpel=C&part=1",
+        "https://elezionistorico.interno.gov.it/index.php?tpel=C&part=2",
+    ]
+    components = {
+        component_urls[0]: official_page.model_copy(
+            update={
+                "source_url": component_urls[0],
+                "summary": {"elettori": 500, "votanti": 450},
+                "records": [
+                    ResultRecord(record_type="list", name="LISTA A", votes=100),
+                    ResultRecord(record_type="list", name="LISTA B", votes=200),
+                    ResultRecord(record_type="total", name="TOTALI", votes=300),
+                ],
+            }
+        ),
+        component_urls[1]: official_page.model_copy(
+            update={
+                "source_url": component_urls[1],
+                "summary": {"elettori": 600, "votanti": 500},
+                "records": [
+                    ResultRecord(record_type="list", name="LISTA A", votes=150),
+                    ResultRecord(record_type="list", name="LISTA B", votes=250),
+                    ResultRecord(record_type="total", name="TOTALI", votes=400),
+                ],
+            }
+        ),
+    }
+    monkeypatch.setattr(
+        service,
+        "fetch_page",
+        lambda url, store: components[url],
+    )
+    batch_response = TestClient(main.app).post(
+        "/api/v1/history/audit/official-municipality-pages",
+        json={"urls": component_urls, "store": False},
+    )
+    assert batch_response.status_code == 200
+    batch = batch_response.json()
+    assert batch["stato"] == "exact_match"
+    assert batch["pagine_ufficiali"] == 2
+    assert batch["insieme_completo"] is False
+    assert batch["source_urls"] == component_urls
+    assert batch["partiti_coincidenti"] == 2
+
+    corrected_components = dict(components)
+    corrected_components[component_urls[1]] = components[
+        component_urls[1]
+    ].model_copy(update={"summary": {"elettori": 700, "votanti": 550}})
+    monkeypatch.setattr(
+        service,
+        "fetch_page",
+        lambda url, store: corrected_components[url],
+    )
+    service.verify_official_municipality_pages(
+        component_urls,
+        store=True,
+        complete_set=True,
+    )
+    corrected = database.municipality_election_audit(
+        municipality="ROMA",
+        categories=("camera",),
+    )[0]
+    assert corrected["fonte_aggregazione"] == "official_municipality_pages"
+    assert corrected["aventi_diritto"] == 1200
+    assert corrected["votanti"] == 1000
+    assert corrected["aventi_diritto_open_data"] == 1100
+    assert corrected["votanti_open_data"] == 950
+    assert corrected["verifica_ufficiale_pagine"] == 2
+    service.close()

@@ -192,6 +192,55 @@ method is documented in [Split-municipality audit](docs/SPLIT_MUNICIPALITY_AUDIT
 and the territorial sources are evaluated in
 [District-map versions](docs/DISTRICT_MAP_VERSIONS.md).
 
+### Verify against official municipality pages
+
+Use an exact municipality result page as the authoritative counter-check:
+
+```powershell
+$body = @{
+  url = "https://elezionistorico.interno.gov.it/index.php?tpel=C&dtel=25/05/1958&..."
+  store = $true
+  relative_tolerance = 0
+  complete_set = $true
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8000/api/v1/history/audit/official-municipality-page `
+  -ContentType application/json `
+  -Body $body
+```
+
+For a municipality divided among several colleges, submit every official
+municipality page in `urls` to
+`POST /api/v1/history/audit/official-municipality-pages`. The endpoint sums
+electors, voters, valid votes, and each party's votes before comparing the
+result with the locally reconstructed municipality. It rejects pages from
+different chambers, election dates, or municipalities. The default tolerance
+is zero, so `exact_match` means equality down to the individual vote.
+Set `complete_set=true` only after supplying every component page. The stored
+verification then becomes the audit's authoritative summary source; the raw
+Open Data electors, voters, and valid votes remain available in the
+`*_open_data` fields.
+
+The live 1958 Rome checks are exact:
+
+| Election | Official pages | Electors | Voters | Valid votes | Parties | Result |
+|---|---:|---:|---:|---:|---:|---|
+| Chamber, 25 May 1958 | 1 | 1,243,752 | 1,183,771 | 1,160,923 | 13/13 | `exact_match` |
+| Senate, 25 May 1958 | 8 | 1,131,128 | 1,069,618 | 1,032,267 | 10/10 | `exact_match` |
+
+The same eight-page procedure identified missing Open Data summary components
+for Rome in the 1948 and 1953 Senate elections. Official electors/voters are
+915,306/797,083 and 986,155/916,069 respectively. All party votes and total
+valid votes already matched. Applying these provenance-preserving corrections
+makes 37 of Rome's 38 Chamber/Senate audit rows pass; the 2006 Senate row
+retains `insufficient_data` because its source omits the required metadata.
+
+This gives official municipality pages priority as a direct validation source.
+The adjacent-election test remains a diagnostic fallback for cases where a
+complete set of municipality pages has not yet been collected.
+
 ## Municipal results by year
 
 ### Import every municipal election held in a year
@@ -342,6 +391,8 @@ linking them to their candidate.
 | `GET` | `/api/v1/history/coverage/national.csv` | Stream the national geography table as CSV |
 | `GET` | `/api/v1/history/coverage/municipality` | Audit a municipality across relevant elections |
 | `GET` | `/api/v1/history/audit/municipality` | Reconstruct and sense-check a split municipality |
+| `POST` | `/api/v1/history/audit/official-municipality-page` | Compare one official municipality page with reconstructed totals |
+| `POST` | `/api/v1/history/audit/official-municipality-pages` | Aggregate split official pages and compare them with reconstructed totals |
 | `GET` | `/api/v1/legal/electoral-laws` | List official electoral laws and boundary instruments |
 | `GET` | `/api/v1/legal/district-maps` | List time-versioned district maps and official source links |
 | `POST` | `/api/v1/legal/electoral-laws/download` | Download, bundle, and hash legal sources |
