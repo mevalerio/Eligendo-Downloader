@@ -494,6 +494,15 @@ def test_municipality_audit_reconstructs_split_colleges(
     assert split["voti_risultato"] == 500
     assert split["data_riferimento"] == "1992-04-05"
     assert split["rapporto_aventi_diritto_riferimento"] == 1.0
+    assert split["data_precedente"] == "1992-04-05"
+    assert split["votanti_precedenti"] == 800
+    assert split["rapporto_votanti_precedenti"] == 1.0
+    assert split["votanti_comparabili"] is True
+    assert split["mappa_collegi_versione"] == "camera-mattarellum-1993-corrected"
+    assert split["fonti_confini_ids"] == [
+        "camera-boundaries-1993-536",
+        "camera-boundaries-1993-536-correction",
+    ]
     assert split["fonte_confini_id"] == "camera-boundaries-1993-536"
     assert split["stato"] == "pass"
 
@@ -504,6 +513,7 @@ def test_municipality_audit_reconstructs_split_colleges(
     )
     assert response.status_code == 200
     assert response.json()["elections_checked"] == 2
+    assert response.json()["voter_tolerance"] == 0.35
     assert response.json()["passed"] == 2
 
 
@@ -540,6 +550,55 @@ def test_municipality_audit_uses_nearest_complete_split_election(tmp_path) -> No
     assert current["data_riferimento"] == "1994-03-27"
     assert current["aventi_diritto_riferimento"] == 1000
     assert current["rapporto_aventi_diritto_riferimento"] == 1.02
+
+
+def test_municipality_audit_flags_adjacent_voter_outlier_and_accepts_tolerance(
+    tmp_path,
+) -> None:
+    database = Database(tmp_path / "voter-comparison.sqlite3")
+    elections = (
+        (date(1992, 4, 5), 800),
+        (date(1994, 3, 27), 400),
+        (date(1996, 4, 21), 820),
+    )
+    for election_date, voters in elections:
+        database.replace_archive(
+            entry("camera", election_date, f"camera-{election_date:%Y%m%d}.zip"),
+            sha256=str(election_date),
+            rows=[
+                source_row(
+                    {
+                        "collegio": "ROMA 1",
+                        "lista": "LISTA A",
+                        "voti_lista": "300",
+                        "elettori": "1000",
+                        "votanti": str(voters),
+                    }
+                )
+            ],
+        )
+
+    strict = database.municipality_election_audit(
+        municipality="ROMA",
+        categories=("camera",),
+        voter_tolerance=0.35,
+    )
+    middle = next(row for row in strict if row["data"] == "1994-03-27")
+    assert middle["data_precedente"] == "1992-04-05"
+    assert middle["data_successiva"] == "1996-04-21"
+    assert middle["rapporto_votanti_precedenti"] == 0.5
+    assert middle["rapporto_votanti_successivi"] == 0.487805
+    assert middle["votanti_comparabili"] is False
+    assert middle["stato"] == "warning"
+
+    tolerant = database.municipality_election_audit(
+        municipality="ROMA",
+        categories=("camera",),
+        voter_tolerance=0.55,
+    )
+    middle = next(row for row in tolerant if row["data"] == "1994-03-27")
+    assert middle["votanti_comparabili"] is True
+    assert middle["stato"] == "pass"
 
 
 def test_municipality_audit_reads_legacy_fragments_without_mutating_them(tmp_path) -> None:

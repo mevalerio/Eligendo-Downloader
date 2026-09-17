@@ -5,7 +5,11 @@ from fastapi.testclient import TestClient
 from app import main
 from app.config import Settings
 from app.database import Database
-from app.electoral_laws import ELECTORAL_LAWS
+from app.electoral_laws import (
+    DISTRICT_MAP_VERSIONS,
+    ELECTORAL_LAWS,
+    district_map_for,
+)
 from app.http_client import Download, validate_url
 from app.service import EligendoService
 
@@ -23,7 +27,7 @@ def settings(tmp_path: Path) -> Settings:
 
 
 def test_electoral_law_registry_covers_every_national_regime() -> None:
-    assert len(ELECTORAL_LAWS) == 19
+    assert len(ELECTORAL_LAWS) == 27
     assert {category for law in ELECTORAL_LAWS for category in law.applies_to} == {
         "assemblea_costituente",
         "camera",
@@ -32,6 +36,7 @@ def test_electoral_law_registry_covers_every_national_regime() -> None:
         "referendum",
     }
     assert sum(law.kind == "boundary_decree" for law in ELECTORAL_LAWS) == 5
+    assert sum(law.kind == "boundary_correction" for law in ELECTORAL_LAWS) == 8
     assert validate_url(ELECTORAL_LAWS[-1].download_url)
 
 
@@ -44,8 +49,35 @@ def test_electoral_law_catalogue_api(tmp_path, monkeypatch) -> None:
         service.close()
 
     assert response.status_code == 200
-    assert len(response.json()) == 19
+    assert len(response.json()) == 27
     assert response.json()[-1]["id"] == "parliament-boundaries-2020-177"
+
+
+def test_district_map_versions_include_intermediate_changes_and_sources(
+    tmp_path, monkeypatch
+) -> None:
+    assert len(DISTRICT_MAP_VERSIONS) == 13
+    assert district_map_for("senato", 1958).id == "senato-1948-corrected"
+    assert district_map_for("senato", 1963).id == "senato-1963-friuli"
+    assert district_map_for("senato", 1992).id == "senato-1992-trentino"
+    assert district_map_for("camera", 1994).source_ids == (
+        "camera-boundaries-1993-536",
+        "camera-boundaries-1993-536-correction",
+    )
+
+    service = EligendoService(settings(tmp_path), Database(tmp_path / "maps.sqlite3"))
+    monkeypatch.setattr(main, "service", service)
+    try:
+        response = TestClient(main.app).get(
+            "/api/v1/legal/district-maps",
+            params={"year": 2018},
+        )
+    finally:
+        service.close()
+
+    assert response.status_code == 200
+    assert len(response.json()) == 2
+    assert all(len(row["source_urls"]) == 3 for row in response.json())
 
 
 def test_electoral_law_download_is_hashed_and_resumable(tmp_path) -> None:

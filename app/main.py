@@ -19,6 +19,7 @@ from .schemas import (
     ArchiveRowsResponse,
     CatalogueEntry,
     ElectionResultsResponse,
+    DistrictMapVersionEntry,
     ElectoralLawDownloadRequest,
     ElectoralLawDownloadResult,
     ElectoralLawEntry,
@@ -456,6 +457,21 @@ def electoral_law_catalogue() -> list[dict[str, object]]:
     return service.electoral_laws()
 
 
+@app.get(
+    "/api/v1/legal/district-maps",
+    response_model=list[DistrictMapVersionEntry],
+    tags=["legal"],
+)
+def district_map_catalogue(
+    category: str | None = None,
+    year: Annotated[int | None, Query(ge=1948, le=2100)] = None,
+) -> list[dict[str, object]]:
+    """List district-map versions and every official source applied to them."""
+    if category not in (None, "camera", "senato"):
+        raise ValueError("category must be 'camera' or 'senato'.")
+    return service.district_maps(category=category, year=year)
+
+
 @app.post(
     "/api/v1/legal/electoral-laws/download",
     response_model=ElectoralLawDownloadResult,
@@ -479,6 +495,7 @@ def download_electoral_laws(
 def audit_municipality_history(
     comune: str,
     category: str | None = None,
+    tolleranza_votanti: Annotated[float, Query(ge=0.05, le=0.80)] = 0.35,
 ) -> MunicipalityAuditResponse:
     """Sense-check reconstructed national-election municipality totals."""
     if category not in (None, "camera", "senato"):
@@ -487,6 +504,7 @@ def audit_municipality_history(
     rows = database.municipality_election_audit(
         municipality=comune,
         categories=categories,
+        voter_tolerance=tolleranza_votanti,
     )
     counts = {
         status: sum(row["stato"] == status for row in rows)
@@ -495,6 +513,7 @@ def audit_municipality_history(
     return MunicipalityAuditResponse(
         comune=comune,
         categories=list(categories),
+        voter_tolerance=tolleranza_votanti,
         elections_checked=len(rows),
         passed=counts["pass"],
         warnings=counts["warning"],

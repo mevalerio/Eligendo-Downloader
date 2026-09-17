@@ -168,11 +168,22 @@ Chamber or Senate election.
 | `data_riferimento` | ISO date or null | Nearest same-category election with electorate data |
 | `aventi_diritto_riferimento` | integer or null | Electors in the reference election |
 | `rapporto_aventi_diritto_riferimento` | number or null | Current electors divided by reference electors |
+| `data_precedente` | ISO date or null | Closest earlier same-chamber election with voter data |
+| `votanti_precedenti` | integer or null | Reconstructed voters in the earlier comparison election |
+| `rapporto_votanti_precedenti` | number or null | Current voters divided by earlier-election voters |
+| `data_successiva` | ISO date or null | Closest later same-chamber election with voter data |
+| `votanti_successivi` | integer or null | Reconstructed voters in the later comparison election |
+| `rapporto_votanti_successivi` | number or null | Current voters divided by later-election voters |
+| `tolleranza_votanti` | number | Symmetric tolerance applied around ratio 1.0; default 0.35 |
+| `votanti_comparabili` | boolean or null | Whether every available adjacent voter ratio is within tolerance |
+| `mappa_collegi_versione` | text or null | Time-versioned district-map identifier |
+| `fonti_confini_ids` | array | Every base instrument, amendment, and correction applied |
+| `fonti_confini_urls` | array | Clickable official URLs corresponding to `fonti_confini_ids` |
 | `fonte_confini_id` | text or null | Applicable item in the electoral-law catalogue |
 | `stato` | text | `pass`, `warning`, `invalid`, or `insufficient_data` |
 
 `invalid` indicates an arithmetic contradiction such as votes exceeding
-voters or electors. `warning` identifies an unusually large electorate change
-or vote/elector ratio. `insufficient_data` means the source does not publish
-the required electorate fields. The check preserves rather than silently
-rewrites anomalous official records.
+voters or electors. `warning` identifies an unusually large voter/elector
+change or vote/elector ratio. `insufficient_data` means the source does not
+publish the required fields or no adjacent comparison exists. The check
+preserves rather than silently rewrites anomalous official records.

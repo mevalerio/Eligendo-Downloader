@@ -141,12 +141,21 @@ original electoral subdivision remains available in `COLLEGIO`.
 ### Download the electoral-law corpus
 
 The legal catalogue covers the principal post-war national electoral regimes
-represented in the archive, including the 1946 Constituent Assembly rules,
-Chamber, Senate, European and referendum laws, and the official 1948, 1993,
-2017 and 2020 college-boundary instruments.
+represented in the archive. Its 27 sources include the 1946 Constituent
+Assembly rules, Chamber, Senate, European and referendum laws, intermediate
+territorial revisions from 1948, 1956, 1963 and 1991, the 1993, 2017 and 2020
+boundary instruments, and their official corrections.
 
 ```text
 GET /api/v1/legal/electoral-laws
+```
+
+The district-map table separates territorial versions from electoral-law
+versions and includes clickable source URLs:
+
+```text
+GET /api/v1/legal/district-maps
+GET /api/v1/legal/district-maps?category=senato&year=1992
 ```
 
 Download and SHA-256 hash every source:
@@ -172,12 +181,16 @@ GET /api/v1/history/audit/municipality?comune=ROMA
 ```
 
 The audit reconstructs municipality totals across every reported college,
-checks votes against voters and electors, and compares the electorate with the
-nearest election of the same category. `parti_rilevate` records the number of
-college fragments found and `fonte_confini_id` identifies the applicable
-official boundary instrument. Use `category=camera` or `category=senato` to
-restrict the check. The validation method and full research run are documented
-in [Split-municipality audit](docs/SPLIT_MUNICIPALITY_AUDIT.md).
+checks votes against voters and electors, and compares voters with both the
+previous and following election of the same chamber. The default tolerance is
+35 per cent and can be changed with `tolleranza_votanti=0.25`, for example.
+`parti_rilevate` records the number of college fragments found,
+`mappa_collegi_versione` identifies the applicable territorial version, and
+`fonti_confini_urls` links every base instrument and correction. Use
+`category=camera` or `category=senato` to restrict the check. The validation
+method is documented in [Split-municipality audit](docs/SPLIT_MUNICIPALITY_AUDIT.md)
+and the territorial sources are evaluated in
+[District-map versions](docs/DISTRICT_MAP_VERSIONS.md).
 
 ## Municipal results by year
 
@@ -330,6 +343,7 @@ linking them to their candidate.
 | `GET` | `/api/v1/history/coverage/municipality` | Audit a municipality across relevant elections |
 | `GET` | `/api/v1/history/audit/municipality` | Reconstruct and sense-check a split municipality |
 | `GET` | `/api/v1/legal/electoral-laws` | List official electoral laws and boundary instruments |
+| `GET` | `/api/v1/legal/district-maps` | List time-versioned district maps and official source links |
 | `POST` | `/api/v1/legal/electoral-laws/download` | Download, bundle, and hash legal sources |
 | `POST` | `/api/v1/municipal/import-year` | Import all municipal elections for a year |
 | `GET` | `/api/v1/municipal/party-results` | Return normalised party results as JSON |

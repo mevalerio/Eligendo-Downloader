@@ -7,6 +7,13 @@ All notable project changes are documented in this file.
 - Added JSON and streaming CSV national-election geography coverage tables,
   grouped by election, region, municipality, college, and source file for
   sense-checking historical geographic coverage.
+- Added explicit district-map versioning separate from electoral-law versions,
+  with eight additional official territorial amendments and corrections.
+- Extended split-municipality validation to compare reconstructed voters with
+  both adjacent elections under a configurable tolerance and return all
+  applicable official source links.
+- Canonicalised Roman-numeral, municipio, and quartiere fragment labels found
+  in the official boundary tables.
 
 ## 2.2.0
 
