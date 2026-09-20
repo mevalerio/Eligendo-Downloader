@@ -70,10 +70,24 @@ the Ministry. The API therefore provides two complementary endpoints:
   set of pages when the municipality is divided among several colleges.
 
 Both endpoints compare electors, voters, valid votes, and party-level votes.
-The multi-page endpoint requires the same chamber, election date, and
-municipality on every page. Its default relative tolerance is zero. Each page
-is retained as a source URL in the response, and `store=true` saves the parsed
-snapshot in the local database.
+The multi-page endpoint requires the same chamber, election date,
+municipality, province, and region on every page. Its default relative
+tolerance is zero. Each page is retained as a source URL in the response, and
+`store=true` saves the parsed snapshot in the local database. A page with
+neither province nor region is rejected because its municipality name alone
+does not establish a safe match.
+
+Names alone do not identify a municipality. The 1958 Chamber archive has two
+municipalities called BRIONE. The [Brescia page](https://elezionistorico.interno.gov.it/index.php?tpel=C&dtel=25/05/1958&tpa=I&tpe=C&lev0=0&levsut0=0&lev1=6&levsut1=1&lev2=15&levsut2=2&levsut3=3&ne1=6&ne2=15&es0=S&es1=S&es2=S&es3=N&ms=S&ne3=150270&lev3=270)
+reports 334 electors, 304 voters, and 296 valid list votes. The
+[Trento page](https://elezionistorico.interno.gov.it/index.php?tpel=C&dtel=25/05/1958&tpa=I&tpe=C&lev0=0&levsut0=0&lev1=8&levsut1=1&lev2=83&levsut2=2&levsut3=3&ne1=8&ne2=83&es0=S&es1=S&es2=S&es3=N&ms=S&ne3=830270&lev3=270)
+reports 164, 162, and 162 respectively. The live API comparison matched all
+10 Brescia party totals and all 11 Trento party totals exactly. Official checks
+are keyed by province and municipality (or by
+region and municipality if the page has no province), so saving one cannot
+overwrite the other. Use `provincia=BRESCIA` or `provincia=TRENTO` in the
+municipality audit. These 1958 Chamber pages do not publish a region, so that
+field remains unknown rather than being inferred from a present-day map.
 
 For Rome in the 1958 Chamber election, the single municipality page matches
 the Open Data reconstruction exactly: 1,243,752 electors, 1,183,771 voters,

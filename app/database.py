@@ -238,7 +238,13 @@ class Database:
                     result["tipo_elezione"],
                     result["data"].isoformat(),
                     result["comune"],
-                    slug(result["comune"]),
+                    (
+                        f"p:{slug(result['provincia'])}|{slug(result['comune'])}"
+                        if result.get("provincia")
+                        else f"r:{slug(result['regione'])}|{slug(result['comune'])}"
+                        if result.get("regione")
+                        else slug(result["comune"])
+                    ),
                     verified_at,
                     result["stato"],
                     int(bool(result["insieme_completo"])),
@@ -258,31 +264,54 @@ class Database:
         *,
         municipality: str,
         categories: tuple[str, ...],
+        province: str | None = None,
+        region: str | None = None,
     ) -> dict[tuple[str, str], dict[str, Any]]:
         placeholders = ",".join("?" for _ in categories)
+        legacy_key = slug(municipality)
+        geography_key = (
+            f"p:{slug(province)}|{legacy_key}"
+            if province
+            else f"r:{slug(region)}|{legacy_key}"
+            if region
+            else legacy_key
+        )
         with closing(self.connect()) as connection:
             rows = connection.execute(
                 f"""
                 SELECT *
                 FROM official_municipality_verifications
-                WHERE municipality_key = ?
+                WHERE municipality_key IN (?, ?)
                   AND category IN ({placeholders})
+                ORDER BY verified_at DESC
                 """,
-                (slug(municipality), *categories),
+                (geography_key, legacy_key, *categories),
             ).fetchall()
-        return {
-            (row["category"], row["election_date"]): {
-                "stato": row["status"],
-                "insieme_completo": bool(row["complete_set"]),
-                "pagine": int(row["official_pages"]),
-                "aventi_diritto": row["official_electors"],
-                "votanti": row["official_voters"],
-                "voti_validi": row["official_valid_votes"],
-                "fonti": json.loads(row["source_urls_json"]),
-                "verificato_il": row["verified_at"],
-            }
-            for row in rows
-        }
+        verifications: dict[tuple[str, str], dict[str, Any]] = {}
+        for row in rows:
+            if row["municipality_key"] == legacy_key and geography_key != legacy_key:
+                payload = json.loads(row["payload_json"])
+                source_geography = (
+                    payload.get("provincia") if province else payload.get("regione")
+                )
+                requested_geography = province or region
+                if slug(source_geography or "") != slug(requested_geography or ""):
+                    continue
+            key = row["category"], row["election_date"]
+            verifications.setdefault(
+                key,
+                {
+                    "stato": row["status"],
+                    "insieme_completo": bool(row["complete_set"]),
+                    "pagine": int(row["official_pages"]),
+                    "aventi_diritto": row["official_electors"],
+                    "votanti": row["official_voters"],
+                    "voti_validi": row["official_valid_votes"],
+                    "fonti": json.loads(row["source_urls_json"]),
+                    "verificato_il": row["verified_at"],
+                },
+            )
+        return verifications
 
     def replace_archive(
         self,
@@ -967,6 +996,8 @@ class Database:
         municipality: str,
         categories: tuple[str, ...] = ("camera", "senato"),
         voter_tolerance: float = 0.35,
+        province: str | None = None,
+        region: str | None = None,
     ) -> list[dict[str, Any]]:
         if not 0 <= voter_tolerance < 1:
             raise ValueError(
@@ -986,6 +1017,14 @@ class Database:
                 "parte_del_comune_di_reggio_di_calabria",
             )
         legacy_placeholders = ",".join("?" for _ in legacy_keys)
+        geography_clause = ""
+        geography_parameters: list[str] = []
+        if province:
+            geography_clause = "AND e.province = ? COLLATE NOCASE"
+            geography_parameters.append(province)
+        elif region:
+            geography_clause = "AND e.region = ? COLLATE NOCASE"
+            geography_parameters.append(region)
         with closing(self.connect()) as connection:
             units = connection.execute(
                 f"""
@@ -1004,6 +1043,7 @@ class Database:
                     OR e.municipality_key IN ({legacy_placeholders})
                 )
                   AND e.category IN ({placeholders})
+                  {geography_clause}
                 GROUP BY e.catalogue_id, e.category, e.election_date,
                          e.source_file, e.result_type, e.round,
                          e.municipality,
@@ -1017,6 +1057,7 @@ class Database:
                     f"{municipality_key}_%",
                     *legacy_keys,
                     *categories,
+                    *geography_parameters,
                 ),
             ).fetchall()
 
@@ -1087,6 +1128,8 @@ class Database:
         official = self.official_municipality_verifications(
             municipality=municipality,
             categories=categories,
+            province=province,
+            region=region,
         )
         for row in selected:
             verification = official.get(
@@ -1264,6 +1307,8 @@ class Database:
         election_date: date,
         source_file: str,
         result_type: str,
+        province: str | None = None,
+        region: str | None = None,
     ) -> list[dict[str, Any]]:
         """Aggregate one selected result layer across municipality fragments."""
         municipality_key = slug(municipality)
@@ -1279,6 +1324,14 @@ class Database:
                 "parte_del_comune_di_reggio_di_calabria",
             )
         legacy_placeholders = ",".join("?" for _ in legacy_keys)
+        geography_clause = ""
+        geography_parameters: list[str] = []
+        if province:
+            geography_clause = "AND province = ? COLLATE NOCASE"
+            geography_parameters.append(province)
+        elif region:
+            geography_clause = "AND region = ? COLLATE NOCASE"
+            geography_parameters.append(region)
         with closing(self.connect()) as connection:
             rows = connection.execute(
                 f"""
@@ -1293,6 +1346,7 @@ class Database:
                   AND election_date = ?
                   AND source_file = ?
                   AND result_type = ?
+                  {geography_clause}
                 ORDER BY subject, municipality
                 """,
                 (
@@ -1303,6 +1357,7 @@ class Database:
                     election_date.isoformat(),
                     source_file,
                     result_type,
+                    *geography_parameters,
                 ),
             ).fetchall()
 

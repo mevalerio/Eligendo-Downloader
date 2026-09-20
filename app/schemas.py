@@ -432,6 +432,8 @@ class MunicipalityAuditRow(BaseModel):
 
 class MunicipalityAuditResponse(BaseModel):
     comune: str
+    provincia: str | None = None
+    regione: str | None = None
     categories: list[str]
     voter_tolerance: float
     elections_checked: int

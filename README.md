@@ -187,7 +187,7 @@ retained as the official PDFs. Existing files are reused unless
 ### Audit a split municipality
 
 ```text
-GET /api/v1/history/audit/municipality?comune=ROMA
+GET /api/v1/history/audit/municipality?comune=ROMA&provincia=ROMA
 ```
 
 The audit reconstructs municipality totals across every reported college,
@@ -197,8 +197,11 @@ previous and following election of the same chamber. The default tolerance is
 `parti_rilevate` records the number of college fragments found,
 `mappa_collegi_versione` identifies the applicable territorial version, and
 `fonti_confini_urls` links every base instrument and correction. Use
-`category=camera` or `category=senato` to restrict the check. The validation
-method is documented in [Split-municipality audit](docs/SPLIT_MUNICIPALITY_AUDIT.md)
+`category=camera` or `category=senato` to restrict the check.
+For homonymous municipalities, supply `provincia` (or `regione` when the
+official page does not publish a province). This limits the comparison to
+the geography identified by the Ministry page. The validation method is
+documented in [Split-municipality audit](docs/SPLIT_MUNICIPALITY_AUDIT.md)
 and the territorial sources are evaluated in
 [District-map versions](docs/DISTRICT_MAP_VERSIONS.md).
 
@@ -226,7 +229,8 @@ municipality page in `urls` to
 `POST /api/v1/history/audit/official-municipality-pages`. The endpoint sums
 electors, voters, valid votes, and each party's votes before comparing the
 result with the locally reconstructed municipality. It rejects pages from
-different chambers, election dates, or municipalities. The default tolerance
+different chambers, election dates, municipalities, provinces, or regions.
+The default tolerance
 is zero, so `exact_match` means equality down to the individual vote.
 Set `complete_set=true` only after supplying every component page. The stored
 verification then becomes the audit's authoritative summary source; the raw
@@ -250,6 +254,10 @@ retains `insufficient_data` because its source omits the required metadata.
 This gives official municipality pages priority as a direct validation source.
 The adjacent-election test remains a diagnostic fallback for cases where a
 complete set of municipality pages has not yet been collected.
+When the source identifies neither province nor region, the verifier refuses
+the comparison rather than inferring geography from a municipality name.
+Set `complete_set=true` only after confirming that the URLs represent every
+component of the same historical municipality.
 
 ## Municipal results by year
 

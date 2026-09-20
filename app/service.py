@@ -140,6 +140,10 @@ class EligendoService:
         municipality = page.geography.comune
         if not municipality:
             raise ValueError("The official URL must identify one municipality.")
+        if not (page.geography.provincia or page.geography.regione):
+            raise ValueError(
+                "The official page must identify a province or region for a safe comparison."
+            )
         for component in pages[1:]:
             component_category = OFFICIAL_PAGE_CATEGORIES.get(
                 (component.election.code or "").upper()
@@ -150,10 +154,16 @@ class EligendoService:
                 raise ValueError("All official pages must use the same election date.")
             if slug(component.geography.comune or "") != slug(municipality):
                 raise ValueError("All official pages must identify the same municipality.")
+            if slug(component.geography.provincia or "") != slug(page.geography.provincia or ""):
+                raise ValueError("All official pages must identify the same province.")
+            if slug(component.geography.regione or "") != slug(page.geography.regione or ""):
+                raise ValueError("All official pages must identify the same region.")
 
         audit_rows = self.database.municipality_election_audit(
             municipality=municipality,
             categories=(category,),
+            province=page.geography.provincia,
+            region=page.geography.regione,
         )
         audit = next(
             (
@@ -207,6 +217,8 @@ class EligendoService:
                     election_date=page.election.date,
                     source_file=str(audit["fonte_file"]),
                     result_type=str(audit["tipo_risultato"]),
+                    province=page.geography.provincia,
+                    region=page.geography.regione,
                 )
             }
 

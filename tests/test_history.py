@@ -1,6 +1,7 @@
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app import main
@@ -910,6 +911,7 @@ def test_official_municipality_page_verifies_split_party_totals(
     corrected = database.municipality_election_audit(
         municipality="ROMA",
         categories=("camera",),
+        province="ROMA",
     )[0]
     assert corrected["fonte_aggregazione"] == "official_municipality_pages"
     assert corrected["aventi_diritto"] == 1200
@@ -917,4 +919,100 @@ def test_official_municipality_page_verifies_split_party_totals(
     assert corrected["aventi_diritto_open_data"] == 1100
     assert corrected["votanti_open_data"] == 950
     assert corrected["verifica_ufficiale_pagine"] == 2
+    service.close()
+
+
+def test_official_pages_keep_homonymous_municipalities_separate(
+    tmp_path, monkeypatch
+) -> None:
+    database = Database(tmp_path / "homonyms.sqlite3")
+    cases = (
+        ("BRESCIA", 334, 304, (("DC", 216), ("PSI", 39))),
+        ("TRENTO", 164, 162, (("DC", 144), ("PSI", 1))),
+    )
+    rows = [
+        source_row(
+            {
+                "lista": party,
+                "voti_lista": str(votes),
+                "elettori": str(electors),
+                "votanti": str(voters),
+            },
+            row_number=2 + case_index * 2 + party_index,
+            region=None,
+            province=province,
+            municipality="BRIONE",
+        )
+        for case_index, (province, electors, voters, parties) in enumerate(cases)
+        for party_index, (party, votes) in enumerate(parties)
+    ]
+    database.replace_archive(
+        entry("camera", date(1958, 5, 25), "camera-19580525.zip"),
+        sha256="homonyms",
+        rows=rows,
+    )
+    settings = Settings(
+        data_dir=Path(tmp_path),
+        database_path=tmp_path / "homonyms.sqlite3",
+        request_interval_seconds=0,
+        request_timeout_seconds=1,
+        catalogue_ttl_seconds=60,
+        max_archive_bytes=1024,
+        max_uncompressed_bytes=1024,
+    )
+    service = EligendoService(settings, database)
+    pages = {}
+    for province, electors, voters, parties in cases:
+        url = f"https://elezionistorico.interno.gov.it/index.php?tpel=C&province={province}"
+        pages[url] = PageResult(
+            source_url=url,
+            retrieved_at=datetime.now(timezone.utc),
+            election=ElectionInfo(code="C", name="Camera", date=date(1958, 5, 25)),
+            geography=Geography(provincia=province, comune="BRIONE"),
+            summary={"elettori": electors, "votanti": voters},
+            records=[
+                ResultRecord(record_type="list", name=party, votes=votes)
+                for party, votes in parties
+            ] + [
+                ResultRecord(
+                    record_type="total",
+                    name="TOTALI",
+                    votes=sum(votes for _, votes in parties),
+                ),
+            ],
+        )
+    monkeypatch.setattr(service, "fetch_page", lambda url, store: pages[url])
+
+    for url in pages:
+        result = service.verify_official_municipality_page(
+            url, store=True, complete_set=True
+        )
+        assert result["stato"] == "exact_match"
+
+    for province, electors, voters, _ in cases:
+        audit = database.municipality_election_audit(
+            municipality="BRIONE",
+            categories=("camera",),
+            province=province,
+        )[0]
+        assert audit["aventi_diritto"] == electors
+        assert audit["votanti"] == voters
+        assert audit["fonte_aggregazione"] == "official_municipality_pages"
+
+    with database.connect() as connection:
+        keys = {
+            row[0]
+            for row in connection.execute(
+                "SELECT municipality_key FROM official_municipality_verifications"
+            )
+        }
+    assert keys == {"p:brescia|brione", "p:trento|brione"}
+    with pytest.raises(ValueError, match="same province"):
+        service.verify_official_municipality_pages(list(pages), store=False)
+    first_url = next(iter(pages))
+    pages[first_url] = pages[first_url].model_copy(
+        update={"geography": Geography(comune="BRIONE")}
+    )
+    with pytest.raises(ValueError, match="province or region"):
+        service.verify_official_municipality_page(first_url, store=False)
     service.close()
