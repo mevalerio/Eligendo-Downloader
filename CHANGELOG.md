@@ -4,6 +4,9 @@ All notable project changes are documented in this file.
 
 ## Unreleased
 
+- Added municipality election keys and geographic completeness status to the
+  main JSON and CSV results, so same-name municipalities can be distinguished
+  when province is available and incomplete source geography is visible.
 - Added JSON and streaming CSV national-election geography coverage tables,
   grouped by election, region, municipality, college, and source file for
   sense-checking historical geographic coverage.
@@ -14,6 +17,14 @@ All notable project changes are documented in this file.
   applicable official source links.
 - Canonicalised Roman-numeral, municipio, and quartiere fragment labels found
   in the official boundary tables.
+- Added exact verification against Ministry municipality result pages,
+  including party-level vote comparisons.
+- Added multi-page verification for municipalities divided among several
+  colleges, validated against all eight Rome components in the 1958 Senate
+  election.
+- Added persistent, explicitly complete official-page summaries that correct
+  audit metadata while retaining the original Open Data values and exact page
+  provenance.
 
 ## 2.2.0
 

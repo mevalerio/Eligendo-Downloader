@@ -60,6 +60,39 @@ is:
 The comparison is a sense check. It does not replace legal-boundary research
 or silently alter an anomalous official source row.
 
+## Direct Ministry-page verification
+
+The strongest operational check is the municipality result page published by
+the Ministry. The API therefore provides two complementary endpoints:
+
+- `POST /api/v1/history/audit/official-municipality-page` compares one page;
+- `POST /api/v1/history/audit/official-municipality-pages` first aggregates a
+  set of pages when the municipality is divided among several colleges.
+
+Both endpoints compare electors, voters, valid votes, and party-level votes.
+The multi-page endpoint requires the same chamber, election date, and
+municipality on every page. Its default relative tolerance is zero. Each page
+is retained as a source URL in the response, and `store=true` saves the parsed
+snapshot in the local database.
+
+For Rome in the 1958 Chamber election, the single municipality page matches
+the Open Data reconstruction exactly: 1,243,752 electors, 1,183,771 voters,
+1,160,923 valid list votes, and all 13 party totals.
+
+For Rome in the 1958 Senate election, the archive exposes eight municipality
+pages under `ROMA I` to `ROMA VIII`. Their aggregate also matches exactly:
+1,131,128 electors, 1,069,618 voters, 1,032,267 valid votes, and all 10 party
+totals. The original temporal audit labelled this row `warning` against the
+uncorrected 1953 summary. After applying the complete 1953 official page set,
+the 1958 row passes the adjacent-election check as well.
+
+Validation evidence is therefore interpreted in this order:
+
+1. an exact match with the complete set of Ministry municipality pages;
+2. consistency with the applicable legal district map; and
+3. proportionality to the previous and following election as a diagnostic
+   sense check.
+
 For uncertain historical names or administrative changes, the audit may also
 be cross-checked against the [Elesh municipal-history database](http://www.elesh.it/storiacomuni/cercacomuni.asp),
 which describes its records as derived from ISTAT and Agenzia delle Entrate
@@ -74,39 +107,39 @@ more than one college fragment.
 
 | Status | Rows |
 |---|---:|
-| Pass | 982 |
-| Warning | 8 |
-| Invalid | 3 |
+| Pass | 985 |
+| Warning | 7 |
+| Invalid | 1 |
 | Insufficient data | 27 |
 
 The warnings were Reggio Calabria (Chamber 2001), Cagliari (Senate 1948 and
-1958), Palermo (Senate 1958), Padova (Chamber 1992, 1994 and 1996), and Rome
-(Senate 1958). These rows are arithmetically coherent but their electorate or
-voter totals differ substantially from an adjacent comparison election.
+1958), Palermo (Senate 1958), and Padova (Chamber 1992, 1994 and 1996). These
+rows are arithmetically coherent but their electorate or voter totals differ
+substantially from an adjacent comparison election.
 
 The invalid rows were:
 
 | Municipality | Election | Parts | Electors | Voters | Result votes | Finding |
 |---|---|---:|---:|---:|---:|---|
 | Cagliari | Senate 1953 | 1 | 18,929 | 17,143 | 62,099 | Published result votes exceed both electorate and voters |
-| Roma | Senate 1948 | 7 | 794,455 | 690,554 | 775,402 | Votes exceed voters; source reports seven Rome labels |
-| Roma | Senate 1953 | 7 | 832,259 | 771,077 | 889,712 | Votes exceed voters and electors; source reports seven Rome labels |
 
-The 1948 Senate boundary decree defines `ROMA I` through `ROMA VIII`. The 1948
-source rows contain I, II, III, V, VI, VII and VIII, with two incompatible
-blocks under `ROMA V`; `ROMA IV` is absent. This supports retaining the two
-elections as invalid source anomalies rather than inventing a correction.
+The raw 1948 and 1953 Senate Open Data rows contain seven Rome summary labels
+and omit the `ROMA IV` electorate/voter component. The party and valid-vote
+totals are complete. Aggregating the eight Ministry municipality pages restores
+the missing metadata: 915,306 electors and 797,083 voters in 1948; 986,155
+electors and 916,069 voters in 1953. The audit preserves the raw values in the
+`*_open_data` fields and identifies the applied source as
+`official_municipality_pages`.
 
 The 27 insufficient-data rows arise where the selected source layer does not
 publish municipality-level electors or voters, notably the 2006 Senate files.
 
 ## Rome result
 
-Rome appears in 38 Chamber/Senate election checks: 34 pass, the 1948 and 1953
-Senate rows are invalid for the reasons above, the 1958 Senate row is a voter
-comparison warning, and the 2006 Senate row has insufficient electorate and
-voter metadata. The 2018 and 2022 rows reconstruct 11 and 7 Chamber parts, and
-5 and 3 Senate parts, respectively; all four pass the arithmetic and adjacent-
+Rome appears in 38 Chamber/Senate election checks: 37 pass after the official
+page corrections and the 2006 Senate row has insufficient electorate and voter
+metadata. The 2018 and 2022 rows reconstruct 11 and 7 Chamber parts, and 5 and
+3 Senate parts, respectively; all four pass the arithmetic and adjacent-
 election voter checks.
 
 ## Reproduction

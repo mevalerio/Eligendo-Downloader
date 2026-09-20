@@ -31,6 +31,9 @@ from .schemas import (
     MunicipalityCoverageResponse,
     MunicipalityAuditResponse,
     NationalGeographyResponse,
+    OfficialMunicipalityPagesVerificationRequest,
+    OfficialMunicipalityVerificationRequest,
+    OfficialMunicipalityVerificationResponse,
     PageRequest,
     PageResult,
     PartyResultsResponse,
@@ -102,6 +105,40 @@ def get_catalogue(
 def parse_page(request: PageRequest) -> PageResult:
     """Download and normalise one page from the historical archive."""
     return service.fetch_page(str(request.url), store=request.store)
+
+
+@app.post(
+    "/api/v1/history/audit/official-municipality-page",
+    response_model=OfficialMunicipalityVerificationResponse,
+    tags=["history"],
+)
+def verify_official_municipality_page(
+    request: OfficialMunicipalityVerificationRequest,
+) -> dict[str, object]:
+    """Compare reconstructed totals with an official municipality page."""
+    return service.verify_official_municipality_page(
+        str(request.url),
+        store=request.store,
+        relative_tolerance=request.relative_tolerance,
+        complete_set=request.complete_set,
+    )
+
+
+@app.post(
+    "/api/v1/history/audit/official-municipality-pages",
+    response_model=OfficialMunicipalityVerificationResponse,
+    tags=["history"],
+)
+def verify_official_municipality_pages(
+    request: OfficialMunicipalityPagesVerificationRequest,
+) -> dict[str, object]:
+    """Aggregate split official pages and compare them with local totals."""
+    return service.verify_official_municipality_pages(
+        [str(url) for url in request.urls],
+        store=request.store,
+        relative_tolerance=request.relative_tolerance,
+        complete_set=request.complete_set,
+    )
 
 
 @app.post(
@@ -221,6 +258,8 @@ HISTORY_CSV_FIELDS = [
     "CIRCOSCRIZIONE",
     "PROVINCIA",
     "COMUNE",
+    "CHIAVE_COMUNE_TORNATA",
+    "STATO_LOCALIZZAZIONE",
     "NAZIONE",
     "COLLEGIO",
     "NUMERO_QUESITO",
