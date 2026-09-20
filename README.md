@@ -101,6 +101,16 @@ GET /api/v1/history/results.csv?category=camera&year=2022&comune=ROMA
 votes are separate option rows. The complete column definition is in the
 [data dictionary](docs/DATA_DICTIONARY.md).
 
+Every main result row exports `REGIONE`, `PROVINCIA`, and `COMUNE` where the
+official source provides them. `CHIAVE_COMUNE_TORNATA` combines election date,
+province, and municipality when the province is known. For example, the 1958
+Chamber results contain both `BRIONE` in Brescia and `BRIONE` in Trento; their
+keys are `1958-05-25|brescia|brione` and
+`1958-05-25|trento|brione`. `STATO_LOCALIZZAZIONE` reports which geographic
+levels the source supplies. When province is missing, the key is empty because
+the municipality name may refer to more than one place. The key describes one
+election's source geography; it is not a permanent municipality code.
+
 ### Sense-check election geography
 
 ```text

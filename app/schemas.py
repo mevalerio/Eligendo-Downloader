@@ -244,6 +244,14 @@ class ElectionResultRow(BaseModel):
     circoscrizione: str | None = None
     provincia: str | None = None
     comune: str | None = None
+    chiave_comune_tornata: str | None = None
+    stato_localizzazione: Literal[
+        "non_municipal",
+        "region_province_municipality",
+        "province_municipality",
+        "region_municipality_incomplete",
+        "municipality_incomplete",
+    ]
     nazione: str | None = None
     collegio: str | None = None
     numero_quesito: str | None = None

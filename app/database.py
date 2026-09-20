@@ -550,14 +550,40 @@ class Database:
 
     @staticmethod
     def _history_row(record: sqlite3.Row) -> dict[str, Any]:
+        municipality = record["municipality"]
+        province = record["province"]
+        region = record["region"]
+        if municipality is None:
+            geography_status = "non_municipal"
+        elif province and region:
+            geography_status = "region_province_municipality"
+        elif province:
+            geography_status = "province_municipality"
+        elif region:
+            geography_status = "region_municipality_incomplete"
+        else:
+            geography_status = "municipality_incomplete"
+        municipality_election_key = (
+            "|".join(
+                (
+                    record["election_date"],
+                    slug(province),
+                    slug(municipality),
+                )
+            )
+            if municipality and province
+            else None
+        )
         return {
             "tipo_elezione": record["category"],
             "data": record["election_date"],
             "turno": record["round"],
-            "regione": record["region"],
+            "regione": region,
             "circoscrizione": record["constituency"],
-            "provincia": record["province"],
-            "comune": record["municipality"],
+            "provincia": province,
+            "comune": municipality,
+            "chiave_comune_tornata": municipality_election_key,
+            "stato_localizzazione": geography_status,
             "nazione": record["country"],
             "collegio": record["college"],
             "numero_quesito": record["question_number"],

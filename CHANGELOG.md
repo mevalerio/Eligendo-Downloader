@@ -4,6 +4,9 @@ All notable project changes are documented in this file.
 
 ## Unreleased
 
+- Added municipality election keys and geographic completeness status to the
+  main JSON and CSV results, so same-name municipalities can be distinguished
+  when province is available and incomplete source geography is visible.
 - Added JSON and streaming CSV national-election geography coverage tables,
   grouped by election, region, municipality, college, and source file for
   sense-checking historical geographic coverage.

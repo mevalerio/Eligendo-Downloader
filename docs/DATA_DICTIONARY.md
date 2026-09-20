@@ -14,6 +14,8 @@ mean that the source archive did not publish that item for the observation.
 | `CIRCOSCRIZIONE` | `circoscrizione` | text or null | Electoral constituency |
 | `PROVINCIA` | `provincia` | text or null | Province |
 | `COMUNE` | `comune` | text or null | Municipality |
+| `CHIAVE_COMUNE_TORNATA` | `chiave_comune_tornata` | text or null | Election date, province, and municipality key; null without a province |
+| `STATO_LOCALIZZAZIONE` | `stato_localizzazione` | text | Geographic detail available for this row |
 | `NAZIONE` | `nazione` | text or null | Country for overseas results |
 | `COLLEGIO` | `collegio` | text or null | Electoral college or retained Rome subdivision |
 | `NUMERO_QUESITO` | `numero_quesito` | text or null | Referendum question number |
@@ -46,6 +48,14 @@ The eight `TIPO_ELEZIONE` values are `assemblea_costituente`, `camera`,
 `senato`, `europee`, `referendum`, `regionali`, `provinciali`, and `comunali`.
 The observational unit varies with the published source geography. Geography
 fields should therefore be retained when aggregating rows.
+`STATO_LOCALIZZAZIONE` is `region_province_municipality`,
+`province_municipality`, `region_municipality_incomplete`,
+`municipality_incomplete`, or `non_municipal`. The incomplete statuses warn
+that a name may identify more than one place. For example,
+`BRIONE` occurs in both Brescia and Trento in the 1958 Chamber election. The
+election key distinguishes those two records when province is present; it is
+not a persistent ISTAT municipality identifier. Missing region or province
+values remain null when the official archive does not supply them.
 
 ## National-election geography coverage
 

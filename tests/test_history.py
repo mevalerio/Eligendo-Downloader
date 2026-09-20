@@ -359,6 +359,73 @@ def test_history_api_and_rome_lazio_coverage(tmp_path, monkeypatch) -> None:
     assert coverage["not_available_at_municipality_level"] == 1
 
 
+def test_main_results_disambiguate_homonymous_municipalities(
+    tmp_path, monkeypatch
+) -> None:
+    database = Database(tmp_path / "homonyms.sqlite3")
+    database.replace_archive(
+        entry("camera", date(1958, 5, 25), "camera-19580525.zip"),
+        sha256="homonyms",
+        rows=[
+            source_row(
+                {"lista": "DC", "voti_lista": "100"},
+                municipality="BRIONE",
+                province="BRESCIA",
+                region="LOMBARDIA",
+                row_number=2,
+            ),
+            source_row(
+                {"lista": "DC", "voti_lista": "200"},
+                municipality="BRIONE",
+                province="TRENTO",
+                region="TRENTINO-ALTO ADIGE",
+                row_number=3,
+            ),
+            source_row(
+                {"lista": "DC", "voti_lista": "300"},
+                municipality="CALLIANO",
+                province=None,
+                region="TRENTINO-ALTO ADIGE",
+                row_number=4,
+            ),
+        ],
+    )
+    monkeypatch.setattr(main, "database", database)
+    client = TestClient(main.app)
+
+    response = client.get(
+        "/api/v1/history/results",
+        params={"category": "camera", "comune": "BRIONE"},
+    )
+    assert response.status_code == 200
+    rows = response.json()["rows"]
+    assert response.json()["count"] == 2
+    assert {row["provincia"] for row in rows} == {"BRESCIA", "TRENTO"}
+    assert {row["chiave_comune_tornata"] for row in rows} == {
+        "1958-05-25|brescia|brione",
+        "1958-05-25|trento|brione",
+    }
+    assert {row["stato_localizzazione"] for row in rows} == {
+        "region_province_municipality"
+    }
+
+    csv_response = client.get(
+        "/api/v1/history/results.csv",
+        params={"category": "camera", "comune": "BRIONE"},
+    )
+    assert csv_response.status_code == 200
+    assert "REGIONE;CIRCOSCRIZIONE;PROVINCIA;COMUNE;CHIAVE_COMUNE_TORNATA;STATO_LOCALIZZAZIONE" in csv_response.text
+    assert "1958-05-25|brescia|brione" in csv_response.text
+    assert "1958-05-25|trento|brione" in csv_response.text
+
+    incomplete = client.get(
+        "/api/v1/history/results",
+        params={"category": "camera", "comune": "CALLIANO"},
+    ).json()["rows"][0]
+    assert incomplete["chiave_comune_tornata"] is None
+    assert incomplete["stato_localizzazione"] == "region_municipality_incomplete"
+
+
 def test_national_geography_table_groups_units_and_streams_csv(
     tmp_path, monkeypatch
 ) -> None:
