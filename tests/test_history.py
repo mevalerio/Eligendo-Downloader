@@ -1,6 +1,7 @@
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app import main
@@ -671,6 +672,59 @@ def test_municipality_audit_flags_adjacent_voter_outlier_and_accepts_tolerance(
     assert middle["stato"] == "pass"
 
 
+def test_municipality_audit_prefers_same_date_other_chamber(tmp_path) -> None:
+    database = Database(tmp_path / "same-date-reference.sqlite3")
+    for category, election_date, voters in (
+        ("camera", date(1992, 4, 5), 800),
+        ("camera", date(1994, 3, 27), 400),
+        ("senato", date(1994, 3, 27), 420),
+        ("camera", date(1996, 4, 21), 820),
+    ):
+        database.replace_archive(
+            entry(category, election_date, f"{category}-{election_date:%Y%m%d}.zip"),
+            sha256=f"{category}-{election_date}",
+            rows=[
+                source_row(
+                    {
+                        "collegio": "ROMA 1",
+                        "lista": "LISTA A",
+                        "voti_lista": "300",
+                        "elettori": "1000",
+                        "votanti": str(voters),
+                    }
+                )
+            ],
+        )
+
+    camera_rows = database.municipality_election_audit(
+        municipality="ROMA",
+        categories=("camera",),
+        voter_tolerance=0.10,
+    )
+    camera = next(row for row in camera_rows if row["data"] == "1994-03-27")
+    assert camera["metodo_riferimento"] == "same_date_other_chamber"
+    assert camera["tipo_elezione_riferimento"] == "senato"
+    assert camera["metodo_confronto_votanti"] == "same_date_other_chamber"
+    assert camera["tipo_elezione_stessa_data"] == "senato"
+    assert camera["votanti_stessa_data"] == 420
+    assert camera["rapporto_votanti_stessa_data"] == 0.952381
+    assert camera["data_precedente"] is None
+    assert camera["data_successiva"] is None
+    assert camera["votanti_comparabili"] is True
+    assert camera["stato"] == "pass"
+
+    senate_rows = database.municipality_election_audit(
+        municipality="ROMA",
+        categories=("senato",),
+        voter_tolerance=0.10,
+    )
+    assert len(senate_rows) == 1
+    senate = senate_rows[0]
+    assert senate["tipo_elezione_stessa_data"] == "camera"
+    assert senate["rapporto_votanti_stessa_data"] == 1.05
+    assert senate["stato"] == "pass"
+
+
 def test_municipality_audit_reads_legacy_fragments_without_mutating_them(tmp_path) -> None:
     database = Database(tmp_path / "legacy.sqlite3")
     database.replace_archive(
@@ -910,6 +964,7 @@ def test_official_municipality_page_verifies_split_party_totals(
     corrected = database.municipality_election_audit(
         municipality="ROMA",
         categories=("camera",),
+        province="ROMA",
     )[0]
     assert corrected["fonte_aggregazione"] == "official_municipality_pages"
     assert corrected["aventi_diritto"] == 1200
@@ -917,4 +972,186 @@ def test_official_municipality_page_verifies_split_party_totals(
     assert corrected["aventi_diritto_open_data"] == 1100
     assert corrected["votanti_open_data"] == 950
     assert corrected["verifica_ufficiale_pagine"] == 2
+    with database.connect() as connection:
+        stored_results = connection.execute(
+            """SELECT result_type, subject, votes
+                 FROM official_municipality_results
+                 ORDER BY subject"""
+        ).fetchall()
+    assert [tuple(row) for row in stored_results] == [
+        ("list", "LISTA A", 250),
+        ("list", "LISTA B", 450),
+    ]
+    service.close()
+
+
+def test_official_verification_queue_is_resumable_and_marks_complete_work(
+    tmp_path, monkeypatch
+) -> None:
+    database = Database(tmp_path / "queue.sqlite3")
+    database.replace_archive(
+        entry("camera", date(1958, 5, 25), "camera-19580525.zip"),
+        sha256="queue",
+        rows=[
+            source_row(
+                {"lista": "LISTA A", "voti_lista": "70", "votanti": "90"},
+                municipality="ROMA I",
+            ),
+            source_row(
+                {"lista": "LISTA A", "voti_lista": "30", "votanti": "40"},
+                municipality="ROMA II",
+                row_number=3,
+            ),
+        ],
+    )
+
+    changed = database.seed_official_verification_queue(
+        category="camera", election_date=date(1958, 5, 25)
+    )
+    assert changed == 1
+    database.seed_official_verification_queue(
+        category="camera", election_date=date(1958, 5, 25)
+    )
+    count, queued = database.official_verification_queue(
+        category="camera",
+        election_date=date(1958, 5, 25),
+        status="pending",
+        limit=10,
+        offset=0,
+    )
+    assert count == 1
+    assert queued[0]["comune"] == "ROMA"
+    assert queued[0]["stato"] == "pending"
+
+    settings = Settings(
+        data_dir=Path(tmp_path),
+        database_path=tmp_path / "queue.sqlite3",
+        request_interval_seconds=0,
+        request_timeout_seconds=1,
+        catalogue_ttl_seconds=60,
+        max_archive_bytes=1024,
+        max_uncompressed_bytes=1024,
+    )
+    service = EligendoService(settings, database)
+    official_page = PageResult(
+        source_url="https://elezionistorico.interno.gov.it/index.php?tpel=C",
+        retrieved_at=datetime.now(timezone.utc),
+        election=ElectionInfo(code="C", name="Camera", date=date(1958, 5, 25)),
+        geography=Geography(regione="LAZIO", provincia="ROMA", comune="ROMA"),
+        summary={"votanti": 90},
+        records=[
+            ResultRecord(record_type="list", name="LISTA A", votes=100),
+            ResultRecord(record_type="total", name="TOTALI", votes=100),
+        ],
+    )
+    monkeypatch.setattr(service, "fetch_page", lambda url, store: official_page)
+    result = service.verify_official_municipality_page(
+        official_page.source_url, store=True, complete_set=True
+    )
+    assert result["stato"] == "exact_match"
+    count, completed = database.official_verification_queue(
+        category="camera",
+        election_date=date(1958, 5, 25),
+        status="verified",
+        limit=10,
+        offset=0,
+    )
+    assert count == 1
+    assert completed[0]["fonti"] == [official_page.source_url]
+    service.close()
+
+
+def test_official_pages_keep_homonymous_municipalities_separate(
+    tmp_path, monkeypatch
+) -> None:
+    database = Database(tmp_path / "homonyms.sqlite3")
+    cases = (
+        ("BRESCIA", 334, 304, (("DC", 216), ("PSI", 39))),
+        ("TRENTO", 164, 162, (("DC", 144), ("PSI", 1))),
+    )
+    rows = [
+        source_row(
+            {
+                "lista": party,
+                "voti_lista": str(votes),
+                "elettori": str(electors),
+                "votanti": str(voters),
+            },
+            row_number=2 + case_index * 2 + party_index,
+            region=None,
+            province=province,
+            municipality="BRIONE",
+        )
+        for case_index, (province, electors, voters, parties) in enumerate(cases)
+        for party_index, (party, votes) in enumerate(parties)
+    ]
+    database.replace_archive(
+        entry("camera", date(1958, 5, 25), "camera-19580525.zip"),
+        sha256="homonyms",
+        rows=rows,
+    )
+    settings = Settings(
+        data_dir=Path(tmp_path),
+        database_path=tmp_path / "homonyms.sqlite3",
+        request_interval_seconds=0,
+        request_timeout_seconds=1,
+        catalogue_ttl_seconds=60,
+        max_archive_bytes=1024,
+        max_uncompressed_bytes=1024,
+    )
+    service = EligendoService(settings, database)
+    pages = {}
+    for province, electors, voters, parties in cases:
+        url = f"https://elezionistorico.interno.gov.it/index.php?tpel=C&province={province}"
+        pages[url] = PageResult(
+            source_url=url,
+            retrieved_at=datetime.now(timezone.utc),
+            election=ElectionInfo(code="C", name="Camera", date=date(1958, 5, 25)),
+            geography=Geography(provincia=province, comune="BRIONE"),
+            summary={"elettori": electors, "votanti": voters},
+            records=[
+                ResultRecord(record_type="list", name=party, votes=votes)
+                for party, votes in parties
+            ] + [
+                ResultRecord(
+                    record_type="total",
+                    name="TOTALI",
+                    votes=sum(votes for _, votes in parties),
+                ),
+            ],
+        )
+    monkeypatch.setattr(service, "fetch_page", lambda url, store: pages[url])
+
+    for url in pages:
+        result = service.verify_official_municipality_page(
+            url, store=True, complete_set=True
+        )
+        assert result["stato"] == "exact_match"
+
+    for province, electors, voters, _ in cases:
+        audit = database.municipality_election_audit(
+            municipality="BRIONE",
+            categories=("camera",),
+            province=province,
+        )[0]
+        assert audit["aventi_diritto"] == electors
+        assert audit["votanti"] == voters
+        assert audit["fonte_aggregazione"] == "official_municipality_pages"
+
+    with database.connect() as connection:
+        keys = {
+            row[0]
+            for row in connection.execute(
+                "SELECT municipality_key FROM official_municipality_verifications"
+            )
+        }
+    assert keys == {"p:brescia|brione", "p:trento|brione"}
+    with pytest.raises(ValueError, match="same province"):
+        service.verify_official_municipality_pages(list(pages), store=False)
+    first_url = next(iter(pages))
+    pages[first_url] = pages[first_url].model_copy(
+        update={"geography": Geography(comune="BRIONE")}
+    )
+    with pytest.raises(ValueError, match="province or region"):
+        service.verify_official_municipality_page(first_url, store=False)
     service.close()

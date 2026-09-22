@@ -8,6 +8,9 @@ data/
 *.db
 .coverage
 htmlcov/
+outputs/
+*.partial
+*.partial.*
 dist/
 build/
 *.egg-info/

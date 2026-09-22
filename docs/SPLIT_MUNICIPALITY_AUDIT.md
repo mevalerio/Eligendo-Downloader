@@ -42,19 +42,20 @@ audit takes electors and voters once and sums result votes across parties or
 candidates. It then sums the college fragments to municipality level. The best
 complete result layer is selected for each election.
 
-The selected row is compared with the closest earlier and later elections of
-the same chamber that have voter data. The default tolerance is 35 per cent,
-so each reconstructed voter ratio must lie within 0.65-1.35. The response also
-retains the nearest-election electorate comparison for continuity. An election
-is:
+The selected row is first compared with the other chamber on the same election
+date when that municipality result has voter data. If no same-date comparison
+exists, the audit uses the closest earlier and later elections of the same
+chamber. The default tolerance is 35 per cent, so each selected voter ratio
+must lie within 0.65-1.35. The electorate comparison follows the same priority.
+An election is:
 
 - `invalid` when votes exceed electors by more than 2%, voters exceed electors
   by more than 1%, or votes exceed voters by more than 2%;
 - `warning` when votes/electors fall outside 0.20-1.02, the electorate is
-  outside 0.65-1.35 of the nearest same-category election, or either adjacent
-  voter ratio falls outside the configured tolerance;
+  outside 0.65-1.35 of the selected reference, or the preferred same-date or
+  fallback adjacent voter ratio falls outside the configured tolerance;
 - `insufficient_data` when the source omits the required electorate/voter data
-  or no adjacent voter reference is available; and
+  or no same-date or adjacent voter reference is available; and
 - `pass` otherwise.
 
 The comparison is a sense check. It does not replace legal-boundary research
@@ -70,10 +71,24 @@ the Ministry. The API therefore provides two complementary endpoints:
   set of pages when the municipality is divided among several colleges.
 
 Both endpoints compare electors, voters, valid votes, and party-level votes.
-The multi-page endpoint requires the same chamber, election date, and
-municipality on every page. Its default relative tolerance is zero. Each page
-is retained as a source URL in the response, and `store=true` saves the parsed
-snapshot in the local database.
+The multi-page endpoint requires the same chamber, election date,
+municipality, province, and region on every page. Its default relative
+tolerance is zero. Each page is retained as a source URL in the response, and
+`store=true` saves the parsed snapshot in the local database. A page with
+neither province nor region is rejected because its municipality name alone
+does not establish a safe match.
+
+Names alone do not identify a municipality. The 1958 Chamber archive has two
+municipalities called BRIONE. The [Brescia page](https://elezionistorico.interno.gov.it/index.php?tpel=C&dtel=25/05/1958&tpa=I&tpe=C&lev0=0&levsut0=0&lev1=6&levsut1=1&lev2=15&levsut2=2&levsut3=3&ne1=6&ne2=15&es0=S&es1=S&es2=S&es3=N&ms=S&ne3=150270&lev3=270)
+reports 334 electors, 304 voters, and 296 valid list votes. The
+[Trento page](https://elezionistorico.interno.gov.it/index.php?tpel=C&dtel=25/05/1958&tpa=I&tpe=C&lev0=0&levsut0=0&lev1=8&levsut1=1&lev2=83&levsut2=2&levsut3=3&ne1=8&ne2=83&es0=S&es1=S&es2=S&es3=N&ms=S&ne3=830270&lev3=270)
+reports 164, 162, and 162 respectively. The live API comparison matched all
+10 Brescia party totals and all 11 Trento party totals exactly. Official checks
+are keyed by province and municipality (or by
+region and municipality if the page has no province), so saving one cannot
+overwrite the other. Use `provincia=BRESCIA` or `provincia=TRENTO` in the
+municipality audit. These 1958 Chamber pages do not publish a region, so that
+field remains unknown rather than being inferred from a present-day map.
 
 For Rome in the 1958 Chamber election, the single municipality page matches
 the Open Data reconstruction exactly: 1,243,752 electors, 1,183,771 voters,
@@ -90,8 +105,8 @@ Validation evidence is therefore interpreted in this order:
 
 1. an exact match with the complete set of Ministry municipality pages;
 2. consistency with the applicable legal district map; and
-3. proportionality to the previous and following election as a diagnostic
-   sense check.
+3. proportionality to the other chamber on the same date, falling back to the
+   previous and following same-chamber elections, as a diagnostic sense check.
 
 For uncertain historical names or administrative changes, the audit may also
 be cross-checked against the [Elesh municipal-history database](http://www.elesh.it/storiacomuni/cercacomuni.asp),
@@ -101,7 +116,7 @@ election files remain the authoritative electoral sources.
 
 ## Full-history result
 
-The validated run covered 28 historically split municipalities and 1,020
+The baseline adjacent-only run covered 28 historically split municipalities and 1,020
 Chamber/Senate municipality-election rows. It reconstructed 277 elections from
 more than one college fragment.
 
@@ -112,10 +127,8 @@ more than one college fragment.
 | Invalid | 1 |
 | Insufficient data | 27 |
 
-The warnings were Reggio Calabria (Chamber 2001), Cagliari (Senate 1948 and
-1958), Palermo (Senate 1958), and Padova (Chamber 1992, 1994 and 1996). These
-rows are arithmetically coherent but their electorate or voter totals differ
-substantially from an adjacent comparison election.
+These counts are retained as a recorded baseline. Re-run the audit to produce
+current counts under the same-date-first rule.
 
 The invalid rows were:
 
@@ -139,8 +152,8 @@ publish municipality-level electors or voters, notably the 2006 Senate files.
 Rome appears in 38 Chamber/Senate election checks: 37 pass after the official
 page corrections and the 2006 Senate row has insufficient electorate and voter
 metadata. The 2018 and 2022 rows reconstruct 11 and 7 Chamber parts, and 5 and
-3 Senate parts, respectively; all four pass the arithmetic and adjacent-
-election voter checks.
+3 Senate parts, respectively. Their current status is determined by the
+same-date other-chamber comparison.
 
 ## Reproduction
 
@@ -152,6 +165,7 @@ GET /api/v1/history/audit/municipality?comune=ROMA
 
 Use `category=camera` or `category=senato` for a single chamber. Set
 `tolleranza_votanti` to change the default 0.35 threshold. The response includes
-the previous and following voter references, every component total, ratio and
-status, `mappa_collegi_versione`, and all `fonti_confini_urls` needed to review
-the result against the downloaded legal corpus.
+the comparison method, same-date or adjacent voter references, every component
+total, ratio and status, `mappa_collegi_versione`, and all
+`fonti_confini_urls` needed to review the result against the downloaded legal
+corpus.

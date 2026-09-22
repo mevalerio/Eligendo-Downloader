@@ -68,3 +68,37 @@ def test_parse_candidate_and_linked_list() -> None:
     assert result.records[0].status == "Eletto sind."
     assert result.records[1].parent_id == "candidato0"
     assert result.records[1].seats == 8
+
+
+def test_parse_two_round_municipal_page() -> None:
+    html = """
+    <div id="headEnti"><h3>Comunali 05/06/2016 <i></i> Area ITALIA
+      <i></i> Regione LAZIO <i></i> Provincia ROMA <i></i> Comune ROMA
+    </h3></div>
+    <table class="dati_riepilogo">
+      <tr><th>Affluenza</th><th>I turno</th><th>II turno</th></tr>
+      <tr><th>Elettori</th><td>2.363.776</td><td>2.363.776</td></tr>
+      <tr><th>Votanti</th><td>1.348.040</td><td>1.185.280</td></tr>
+    </table>
+    <table summary="Risultati elezione"><thead><tr>
+      <th id="hvoti">Voti I turno</th><th id="hvoti2">Voti II turno</th>
+    </tr></thead><tbody>
+      <tr class="leader"><td id="candidato0">CANDIDATA A</td>
+        <td headers="hvoti candidato0">453.806</td>
+        <td headers="hpercentuale candidato0">35,25</td>
+        <td headers="hvoti2 candidato0">770.564</td>
+        <td headers="hpercentuale2 candidato0">67,15</td></tr>
+      <tr class="totalecomplessivovoti"><th>TOTALI</th>
+        <td headers="hvoti">1.287.572</td>
+        <td headers="hvoti2">1.147.236</td></tr>
+    </tbody></table>
+    """
+    result = parse_page_html(html, URL.replace("tpel=A", "tpel=G"))
+    candidates = [row for row in result.records if row.record_type == "candidate"]
+    assert [(row.round, row.votes) for row in candidates] == [
+        (1, 453806),
+        (2, 770564),
+    ]
+    assert result.summary["elettori"] == 2363776
+    assert result.summary["elettori_turno_2"] == 2363776
+    assert result.summary["votanti_turno_2"] == 1185280

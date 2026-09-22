@@ -183,9 +183,15 @@ Chamber or Senate election.
 | `verifica_ufficiale_fonti` | array | Exact Ministry municipality page URLs used |
 | `verifica_ufficiale_data` | timestamp or null | Time at which the official-page verification was stored |
 | `rapporto_voti_aventi_diritto` | number or null | Result votes divided by electors |
-| `data_riferimento` | ISO date or null | Nearest same-category election with electorate data |
+| `data_riferimento` | ISO date or null | Date of the electorate reference selected by the same-date-first rule |
+| `tipo_elezione_riferimento` | text or null | Chamber supplying the electorate reference |
+| `metodo_riferimento` | text or null | `same_date_other_chamber` or fallback `adjacent_same_chamber` |
 | `aventi_diritto_riferimento` | integer or null | Electors in the reference election |
 | `rapporto_aventi_diritto_riferimento` | number or null | Current electors divided by reference electors |
+| `metodo_confronto_votanti` | text or null | Same-date other chamber when available; otherwise adjacent same-chamber elections |
+| `tipo_elezione_stessa_data` | text or null | Chamber used for the same-date turnout comparison |
+| `votanti_stessa_data` | integer or null | Voters reported for the other chamber on the same date |
+| `rapporto_votanti_stessa_data` | number or null | Current voters divided by same-date other-chamber voters |
 | `data_precedente` | ISO date or null | Closest earlier same-chamber election with voter data |
 | `votanti_precedenti` | integer or null | Reconstructed voters in the earlier comparison election |
 | `rapporto_votanti_precedenti` | number or null | Current voters divided by earlier-election voters |
@@ -193,7 +199,7 @@ Chamber or Senate election.
 | `votanti_successivi` | integer or null | Reconstructed voters in the later comparison election |
 | `rapporto_votanti_successivi` | number or null | Current voters divided by later-election voters |
 | `tolleranza_votanti` | number | Symmetric tolerance applied around ratio 1.0; default 0.35 |
-| `votanti_comparabili` | boolean or null | Whether every available adjacent voter ratio is within tolerance |
+| `votanti_comparabili` | boolean or null | Whether the preferred same-date ratio, or every fallback adjacent ratio, is within tolerance |
 | `mappa_collegi_versione` | text or null | Time-versioned district-map identifier |
 | `fonti_confini_ids` | array | Every base instrument, amendment, and correction applied |
 | `fonti_confini_urls` | array | Clickable official URLs corresponding to `fonti_confini_ids` |
@@ -203,7 +209,7 @@ Chamber or Senate election.
 `invalid` indicates an arithmetic contradiction such as votes exceeding
 voters or electors. `warning` identifies an unusually large voter/elector
 change or vote/elector ratio. `insufficient_data` means the source does not
-publish the required fields or no adjacent comparison exists. The check
+publish the required fields or no same-date or adjacent comparison exists. The check
 preserves rather than silently rewrites anomalous official records.
 
 ## Official municipality-page verification
@@ -218,7 +224,7 @@ it with the selected local aggregation layer.
 | `source_urls` | array | Complete set of official municipality pages used |
 | `pagine_ufficiali` | integer | Number of distinct official pages aggregated |
 | `insieme_completo` | boolean | Whether the caller declared that every municipality component page is present |
-| `tipo_elezione` | text | `camera` or `senato` |
+| `tipo_elezione` | text | `camera`, `senato`, `europee`, `regionali`, or `comunali` |
 | `data` | ISO date | Election date shared by every page |
 | `comune` | text | Municipality shared by every page |
 | `tolleranza_relativa` | number | Allowed relative difference; default `0` |
@@ -228,7 +234,28 @@ it with the selected local aggregation layer.
 | `partiti_coincidenti` | integer | Parties matching exactly or within the requested tolerance |
 | `partiti_non_coincidenti` | integer | Mismatched or missing parties |
 | `partiti` | array | Party-level official votes, reconstructed votes, differences, and status |
+| `risultati_ufficiali` | array | Normalised candidate, list, option, round, vote, percentage, and seat records aggregated across the supplied pages |
 
 Only a stored verification with `complete_set=true` may supply authoritative
 summary metadata to the municipality audit. This explicit declaration prevents
 an incomplete subset of college pages from replacing a full municipal total.
+
+## Reconciliation storage
+
+`official_municipality_results` stores the normalised website result rows linked
+to one `official_municipality_verifications` record. These rows never overwrite
+`election_results`, which remains the immutable ZIP-derived layer. `round` is
+`1` or `2` when the official page publishes separate municipal-round columns;
+historical records without a round use `-1` internally.
+
+`official_verification_queue` stores resumable municipality work items seeded
+from `election_results`. Its states are `pending`, `partial`, `verified`, and
+`failed`. The municipality key includes province when available, otherwise
+region, so homonymous municipalities remain separate. An absent round is stored
+internally as `-1` and exposed by the API as `null`.
+
+`official_reconciliation_runs` is the election-level restart ledger. Its key is
+`category` plus `election_date`; its status is `running`, `partial`, `complete`,
+`unavailable`, or `failed`. `result_json` records request and page counts, while
+`last_error` retains a terminal failure message. The all-election runner skips
+`complete` and `unavailable` keys unless explicitly told to retry them.

@@ -27,6 +27,11 @@ dependencies = [
   "uvicorn[standard]>=0.30,<1",
 ]
 
+[project.scripts]
+eligendo-reconcile = "app.reconcile:main"
+eligendo-reconcile-all = "app.reconcile_all:main"
+eligendo-data = "app.data_portability:main"
+
 [project.optional-dependencies]
 dev = ["pytest>=8,<9"]
 

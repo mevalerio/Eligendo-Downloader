@@ -4,6 +4,10 @@ All notable project changes are documented in this file.
 
 ## Unreleased
 
+- Made official-page verification geography-aware: same-name municipalities
+  in different provinces are compared and stored separately, and mixed-page
+  sets are rejected. Confirmed against both Ministry BRIONE pages for the
+  1958 Chamber election.
 - Added municipality election keys and geographic completeness status to the
   main JSON and CSV results, so same-name municipalities can be distinguished
   when province is available and incomplete source geography is visible.

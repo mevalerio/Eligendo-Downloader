@@ -34,6 +34,8 @@ from .schemas import (
     OfficialMunicipalityPagesVerificationRequest,
     OfficialMunicipalityVerificationRequest,
     OfficialMunicipalityVerificationResponse,
+    OfficialVerificationQueueResponse,
+    OfficialVerificationQueueSeedRequest,
     PageRequest,
     PageResult,
     PartyResultsResponse,
@@ -139,6 +141,50 @@ def verify_official_municipality_pages(
         relative_tolerance=request.relative_tolerance,
         complete_set=request.complete_set,
     )
+
+
+@app.post(
+    "/api/v1/history/reconciliation/queue",
+    tags=["history"],
+)
+def seed_official_verification_queue(
+    request: OfficialVerificationQueueSeedRequest,
+) -> dict[str, int]:
+    """Seed resumable municipality checks from imported ZIP results."""
+    changed = database.seed_official_verification_queue(
+        category=request.tipo_elezione,
+        election_date=request.data,
+    )
+    return {"inserted_or_updated": changed}
+
+
+@app.get(
+    "/api/v1/history/reconciliation/queue",
+    response_model=OfficialVerificationQueueResponse,
+    tags=["history"],
+)
+def get_official_verification_queue(
+    tipo_elezione: str | None = None,
+    data: date | None = None,
+    stato: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=5000)] = 1000,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict[str, object]:
+    """List pending, partial, verified, or failed municipality checks."""
+    allowed_categories = {"camera", "senato", "europee", "regionali", "comunali"}
+    allowed_statuses = {"pending", "partial", "verified", "failed"}
+    if tipo_elezione is not None and tipo_elezione not in allowed_categories:
+        raise ValueError("Unsupported election category.")
+    if stato is not None and stato not in allowed_statuses:
+        raise ValueError("Unsupported queue status.")
+    count, rows = database.official_verification_queue(
+        category=tipo_elezione,
+        election_date=data,
+        status=stato,
+        limit=limit,
+        offset=offset,
+    )
+    return {"count": count, "limit": limit, "offset": offset, "rows": rows}
 
 
 @app.post(
@@ -535,6 +581,8 @@ def audit_municipality_history(
     comune: str,
     category: str | None = None,
     tolleranza_votanti: Annotated[float, Query(ge=0.05, le=0.80)] = 0.35,
+    provincia: str | None = None,
+    regione: str | None = None,
 ) -> MunicipalityAuditResponse:
     """Sense-check reconstructed national-election municipality totals."""
     if category not in (None, "camera", "senato"):
@@ -544,6 +592,8 @@ def audit_municipality_history(
         municipality=comune,
         categories=categories,
         voter_tolerance=tolleranza_votanti,
+        province=provincia,
+        region=regione,
     )
     counts = {
         status: sum(row["stato"] == status for row in rows)
@@ -551,6 +601,8 @@ def audit_municipality_history(
     }
     return MunicipalityAuditResponse(
         comune=comune,
+        provincia=provincia,
+        regione=regione,
         categories=list(categories),
         voter_tolerance=tolleranza_votanti,
         elections_checked=len(rows),

@@ -110,6 +110,27 @@ def test_historical_rome_constituency_is_canonicalised_as_municipality() -> None
     assert rows[0].payload["collegio"] == "Roma - Appio Latino"
 
 
+def test_historical_european_descr_geography_aliases_are_parsed() -> None:
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr(
+            "europee-19990613.txt",
+            (
+                "descrcirc;descrreg;descrprov;descrcomune;lista;voti_lista\n"
+                "ITALIA MERIDIONALE;ABRUZZO;L'AQUILA;GAGLIANO ATERNO;"
+                "LISTA A;19\n"
+            ),
+        )
+
+    rows = parse_zip_archive(stream.getvalue(), max_uncompressed_bytes=100_000)
+
+    assert len(rows) == 1
+    assert rows[0].circoscrizione == "ITALIA MERIDIONALE"
+    assert rows[0].region == "ABRUZZO"
+    assert rows[0].province == "L'AQUILA"
+    assert rows[0].municipality == "GAGLIANO ATERNO"
+
+
 def test_official_submunicipal_labels_are_canonicalised() -> None:
     for label, expected in (
         ("TRIESTE II", "TRIESTE"),

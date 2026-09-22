@@ -69,9 +69,21 @@ def _parse_summary(soup: BeautifulSoup) -> dict[str, int | float | str | None]:
                 continue
             label = clean_text(label_cell.get_text(" ", strip=True))
             key = slug(label)
-            value_text = clean_text(value_cells[0].get_text(" ", strip=True))
+            numeric_cells = [
+                cell for cell in value_cells
+                if "percentuale" not in cell.get("class", [])
+            ]
+            if not numeric_cells:
+                continue
+            value_text = clean_text(numeric_cells[0].get_text(" ", strip=True))
             value = parse_italian_int(value_text)
             summary[key] = value if value is not None else value_text
+            if len(numeric_cells) > 1:
+                second_text = clean_text(numeric_cells[1].get_text(" ", strip=True))
+                second_value = parse_italian_int(second_text)
+                summary[f"{key}_turno_2"] = (
+                    second_value if second_value is not None else second_text
+                )
             percentage_cell = next(
                 (cell for cell in value_cells[1:] if "percentuale" in cell.get("class", [])),
                 None,
@@ -90,7 +102,15 @@ def _find_results_table(soup: BeautifulSoup) -> Tag:
     raise ValueError("Results table not found.")
 
 
-def _parse_record(row: Tag, source_url: str) -> ResultRecord | None:
+def _parse_record(
+    row: Tag,
+    source_url: str,
+    *,
+    votes_header: str = "hvoti",
+    percentage_header: str = "hpercentuale",
+    seats_header: str = "hseggi",
+    round_number: int | None = None,
+) -> ResultRecord | None:
     classes = set(row.get("class", []))
     candidate_cell = row.find(id=re.compile(r"^candidato\d+$"))
     list_cell = row.select_one("th.candidato")
@@ -127,9 +147,11 @@ def _parse_record(row: Tag, source_url: str) -> ResultRecord | None:
         if parent_id:
             break
 
-    votes_cell = _cell_by_header(row, "hvoti")
-    percentage_cell = _cell_by_header(row, "hpercentuale")
-    seats_cell = _cell_by_header(row, "hseggi")
+    votes_cell = _cell_by_header(row, votes_header)
+    percentage_cell = _cell_by_header(row, percentage_header)
+    seats_cell = _cell_by_header(row, seats_header)
+    if round_number == 2 and votes_cell is None:
+        return None
     image = row.find("img")
     status = None
     if record_type == "candidate":
@@ -142,6 +164,7 @@ def _parse_record(row: Tag, source_url: str) -> ResultRecord | None:
         record_id=record_id,
         parent_id=parent_id,
         name=name,
+        round=round_number,
         status=status,
         votes=parse_italian_int(votes_cell.get_text(" ", strip=True)) if votes_cell else None,
         percentage=(
@@ -159,10 +182,29 @@ def parse_page_html(html: str | bytes, source_url: str) -> PageResult:
     soup = BeautifulSoup(html, "html.parser")
     election, geography = _parse_heading(soup, source_url)
     records = []
-    for row in _find_results_table(soup).select("tbody tr"):
-        record = _parse_record(row, source_url)
+    results_table = _find_results_table(soup)
+    has_second_round = bool(
+        results_table.select_one("[headers~='hvoti2'], #hvoti2")
+    )
+    for row in results_table.select("tbody tr"):
+        record = _parse_record(
+            row,
+            source_url,
+            round_number=1 if has_second_round else None,
+        )
         if record:
             records.append(record)
+        if has_second_round:
+            second_round = _parse_record(
+                row,
+                source_url,
+                votes_header="hvoti2",
+                percentage_header="hpercentuale2",
+                seats_header="hseggi2",
+                round_number=2,
+            )
+            if second_round:
+                records.append(second_round)
     if not records:
         raise ValueError("The results table contains no recognisable rows.")
     return PageResult(
