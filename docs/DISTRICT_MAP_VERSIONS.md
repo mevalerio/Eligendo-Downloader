@@ -70,9 +70,10 @@ The default tolerance is 35 per cent, expressed as a permitted ratio of
 GET /api/v1/history/audit/municipality?comune=ROMA&tolleranza_votanti=0.35
 ```
 
-An election receives a warning when either adjacent-election voter ratio falls
-outside the tolerance. Arithmetic contradictions, such as result votes above
-voters or electors, remain invalid regardless of the temporal comparison.
+An election receives a warning when the same-date other-chamber voter ratio,
+or either fallback adjacent same-chamber ratio, falls outside the tolerance.
+Arithmetic contradictions, such as result votes above voters or electors,
+remain invalid regardless of the temporal comparison.
 
 ## Major-city sense check
 

@@ -50,6 +50,14 @@ Official legal catalogue -> article/PDF downloader -> hashed local corpus
 - `app/database.py` owns the SQLite schema, transactional replacement, and
   filtered queries, including the grouped national-election geography
   coverage table used to expose municipality and college splits.
+- `app/reconcile.py` follows the website's encoded geography selectors for one
+  election, validates the rendered election heading, and stores municipality
+  comparisons and normalised official rows.
+- `app/reconcile_all.py` runs that process sequentially for every imported
+  Camera, Senato, European, regional, and municipal election, using the
+  election-level restart ledger to resume safely.
+- `app/data_portability.py` creates SHA-256-manifested SQLite backups for a
+  synchronised data store and restores verified local working copies.
 - `app/service.py` coordinates catalogue caching, downloads, parsing, hashes,
   and database writes.
 - `app/main.py` exposes the FastAPI application, JSON endpoints, and streaming
@@ -87,8 +95,9 @@ municipality and result subject before insertion; their provenance uses a
 Municipality reconstruction is a separate projection. It takes electors and
 voters once per distinct college fragment, sums the fragments to the canonical
 municipality, and retains the original college labels. The audit compares the
-reconstructed voters with the closest earlier and later elections of the same
-chamber under a configurable tolerance. Every output row carries the selected
+reconstructed voters with the other chamber on the same election date when
+available. The closest earlier and later elections of the same chamber are the
+fallback under a configurable tolerance. Every output row carries the selected
 district-map version and links to all applicable official sources.
 
 The compact municipal export is a projection:

@@ -134,6 +134,7 @@ def _archive_row(file_name: str, row_number: int, payload: dict[str, Any]) -> Ar
                 "comune",
                 "com",
                 "desccomune",
+                "descrcomune",
                 "denominazione_comune",
                 "descrizione_comune",
                 "denominazione",
@@ -145,7 +146,10 @@ def _archive_row(file_name: str, row_number: int, payload: dict[str, Any]) -> Ar
         row_number=row_number,
         region=_first(
             payload,
-            ("regione", "reg", "descregione", "denominazione_regione"),
+            (
+                "regione", "reg", "descregione", "descrreg",
+                "denominazione_regione",
+            ),
         ),
         circoscrizione=_first(
             payload,
@@ -154,12 +158,16 @@ def _archive_row(file_name: str, row_number: int, payload: dict[str, Any]) -> Ar
                 "circoscr",
                 "circ_reg",
                 "desccirceuropea",
+                "descrcirc",
                 "denominazione_circoscrizione",
             ),
         ),
         province=_first(
             payload,
-            ("provincia", "prov", "descprovincia", "denominazione_provincia"),
+            (
+                "provincia", "prov", "descprovincia", "descrprov",
+                "denominazione_provincia",
+            ),
         ),
         municipality=municipality,
         municipality_key=slug(municipality) if municipality else None,

@@ -28,7 +28,13 @@ from .scraper import parse_page_html
 from .utils import slug
 
 
-OFFICIAL_PAGE_CATEGORIES = {"C": "camera", "S": "senato"}
+OFFICIAL_PAGE_CATEGORIES = {
+    "C": "camera",
+    "S": "senato",
+    "E": "europee",
+    "R": "regionali",
+    "G": "comunali",
+}
 
 
 class EligendoService:
@@ -124,18 +130,21 @@ class EligendoService:
         store: bool = True,
         relative_tolerance: float = 0.0,
         complete_set: bool = False,
+        _pages: list[PageResult] | None = None,
     ) -> dict[str, object]:
         """Aggregate official split pages and compare them with local totals."""
         unique_urls = list(dict.fromkeys(urls))
         if not unique_urls:
             raise ValueError("At least one official municipality URL is required.")
-        pages = [self.fetch_page(url, store=store) for url in unique_urls]
+        pages = _pages or [self.fetch_page(url, store=store) for url in unique_urls]
+        if {page.source_url for page in pages} != set(unique_urls):
+            raise ValueError("Cached official pages do not match the requested URLs.")
         page = pages[0]
         category = OFFICIAL_PAGE_CATEGORIES.get((page.election.code or "").upper())
         if category is None:
             raise ValueError(
-                "Official municipality verification currently supports Camera "
-                "and Senato pages."
+                "Official municipality verification supports Camera, Senato, "
+                "Europee, Regionali, and Comunali pages."
             )
         municipality = page.geography.comune
         if not municipality:
@@ -159,44 +168,84 @@ class EligendoService:
             if slug(component.geography.regione or "") != slug(page.geography.regione or ""):
                 raise ValueError("All official pages must identify the same region.")
 
-        audit_rows = self.database.municipality_election_audit(
+        audit = self.database.municipality_election_layer(
             municipality=municipality,
-            categories=(category,),
+            category=category,
+            election_date=page.election.date,
             province=page.geography.provincia,
             region=page.geography.regione,
         )
-        audit = next(
-            (
-                row
-                for row in audit_rows
-                if row["data"] == page.election.date.isoformat()
-            ),
-            None,
-        )
 
-        official_lists: dict[str, dict[str, object]] = {}
+        official_results: dict[tuple[str, str, int], dict[str, object]] = {}
         for component in pages:
             for record in component.records:
-                if record.record_type != "list" or record.votes is None:
+                if record.record_type in ("total", "coalition_total"):
                     continue
-                key = slug(record.name)
-                current = official_lists.setdefault(
-                    key,
-                    {"name": record.name, "votes": 0},
+                key = (
+                    record.record_type,
+                    slug(record.name),
+                    record.round or -1,
                 )
-                current["votes"] = int(current["votes"]) + record.votes
+                current = official_results.setdefault(
+                    key,
+                    {
+                        "tipo_risultato": record.record_type,
+                        "soggetto": record.name,
+                        "turno": record.round,
+                        "voti": 0 if record.votes is not None else None,
+                        "percentuale": record.percentage,
+                        "seggi": 0 if record.seats is not None else None,
+                        "componenti": 0,
+                    },
+                )
+                current["componenti"] = int(current["componenti"]) + 1
+                if record.votes is not None:
+                    current["voti"] = int(current["voti"] or 0) + record.votes
+                if record.seats is not None:
+                    current["seggi"] = int(current["seggi"] or 0) + record.seats
+                if len(pages) > 1:
+                    current["percentuale"] = None
+
+        comparison_result_type = (
+            str(audit["tipo_risultato"]) if audit is not None else "list"
+        )
+        official_subjects = {
+            key[1]: {"name": row["soggetto"], "votes": row["voti"]}
+            for key, row in official_results.items()
+            if key[0] == comparison_result_type
+            and key[2] in (-1, 1)
+            and row["voti"] is not None
+        }
 
         total_records = [
             record.votes
             for component in pages
             for record in component.records
-            if record.record_type == "total" and record.votes is not None
+            if record.record_type == "total"
+            and record.round in (None, 1)
+            and record.votes is not None
         ]
-        official_valid_votes = (
-            sum(total_records)
-            if total_records
-            else sum(int(row["votes"]) for row in official_lists.values())
-        )
+        if total_records:
+            official_valid_votes = sum(total_records)
+        else:
+            fallback_type = next(
+                (
+                    result_type
+                    for result_type in ("list", "candidate", "option")
+                    if any(
+                        key[0] == result_type and key[2] in (-1, 1)
+                        for key in official_results
+                    )
+                ),
+                comparison_result_type,
+            )
+            official_valid_votes = sum(
+                int(row["voti"])
+                for key, row in official_results.items()
+                if key[0] == fallback_type
+                and key[2] in (-1, 1)
+                and row["voti"] is not None
+            )
 
         def aggregate_summary(field: str) -> int | None:
             values = [component.summary.get(field) for component in pages]
@@ -217,6 +266,7 @@ class EligendoService:
                     election_date=page.election.date,
                     source_file=str(audit["fonte_file"]),
                     result_type=str(audit["tipo_risultato"]),
+                    round_number=audit["turno"],
                     province=page.geography.provincia,
                     region=page.geography.regione,
                 )
@@ -248,8 +298,8 @@ class EligendoService:
         ]
 
         parties: list[dict[str, object]] = []
-        for key in sorted(official_lists.keys() | local_lists.keys()):
-            official = official_lists.get(key)
+        for key in sorted(official_subjects.keys() | local_lists.keys()):
+            official = official_subjects.get(key)
             local = local_lists.get(key)
             official_votes = int(official["votes"]) if official else None
             local_votes = int(local["votes"]) if local else None
@@ -336,10 +386,35 @@ class EligendoService:
             "partiti_coincidenti": party_matches,
             "partiti_non_coincidenti": party_mismatches,
             "partiti": parties,
+            "risultati_ufficiali": sorted(
+                official_results.values(),
+                key=lambda row: (
+                    int(row["turno"] or -1),
+                    str(row["tipo_risultato"]),
+                    str(row["soggetto"]),
+                ),
+            ),
         }
         if store:
             self.database.store_official_municipality_verification(verification)
         return verification
+
+    def verify_official_page_results(
+        self,
+        pages: list[PageResult],
+        *,
+        store: bool = True,
+        relative_tolerance: float = 0.0,
+        complete_set: bool = False,
+    ) -> dict[str, object]:
+        """Verify already downloaded pages without fetching them a second time."""
+        return self.verify_official_municipality_pages(
+            [page.source_url for page in pages],
+            store=store,
+            relative_tolerance=relative_tolerance,
+            complete_set=complete_set,
+            _pages=pages,
+        )
 
     def electoral_laws(self) -> list[dict[str, object]]:
         law_dir = self.settings.data_dir / "electoral_laws"

@@ -164,6 +164,56 @@ CREATE INDEX IF NOT EXISTS idx_official_verification_lookup
 ON official_municipality_verifications(
     category, election_date, municipality_key
 );
+
+CREATE TABLE IF NOT EXISTS official_municipality_results (
+    id INTEGER PRIMARY KEY,
+    verification_id INTEGER NOT NULL
+        REFERENCES official_municipality_verifications(id) ON DELETE CASCADE,
+    result_type TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    subject_key TEXT NOT NULL,
+    round INTEGER NOT NULL DEFAULT -1,
+    votes INTEGER,
+    percentage REAL,
+    seats INTEGER,
+    payload_json TEXT NOT NULL,
+    UNIQUE(verification_id, result_type, subject_key, round)
+);
+
+CREATE INDEX IF NOT EXISTS idx_official_municipality_results_lookup
+ON official_municipality_results(verification_id, result_type, subject_key, round);
+
+CREATE TABLE IF NOT EXISTS official_verification_queue (
+    id INTEGER PRIMARY KEY,
+    category TEXT NOT NULL,
+    election_date TEXT NOT NULL,
+    round INTEGER NOT NULL DEFAULT -1,
+    region TEXT,
+    province TEXT,
+    municipality TEXT NOT NULL,
+    municipality_key TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    source_urls_json TEXT NOT NULL DEFAULT '[]',
+    last_error TEXT,
+    updated_at TEXT NOT NULL,
+    UNIQUE(category, election_date, round, municipality_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_official_verification_queue_status
+ON official_verification_queue(status, priority DESC, election_date, category);
+
+CREATE TABLE IF NOT EXISTS official_reconciliation_runs (
+    category TEXT NOT NULL,
+    election_date TEXT NOT NULL,
+    status TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    result_json TEXT NOT NULL DEFAULT '{}',
+    last_error TEXT,
+    PRIMARY KEY(category, election_date)
+);
 """
 
 
@@ -182,6 +232,100 @@ class Database:
     def initialise(self) -> None:
         with closing(self.connect()) as connection:
             connection.executescript(SCHEMA)
+            result_columns = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(official_municipality_results)"
+                )
+            }
+            if "round" not in result_columns:
+                connection.execute(
+                    "DROP INDEX IF EXISTS idx_official_municipality_results_lookup"
+                )
+                connection.execute(
+                    "ALTER TABLE official_municipality_results "
+                    "RENAME TO official_municipality_results_legacy"
+                )
+                connection.execute(
+                    """CREATE TABLE official_municipality_results (
+                           id INTEGER PRIMARY KEY,
+                           verification_id INTEGER NOT NULL
+                               REFERENCES official_municipality_verifications(id)
+                               ON DELETE CASCADE,
+                           result_type TEXT NOT NULL,
+                           subject TEXT NOT NULL,
+                           subject_key TEXT NOT NULL,
+                           round INTEGER NOT NULL DEFAULT -1,
+                           votes INTEGER,
+                           percentage REAL,
+                           seats INTEGER,
+                           payload_json TEXT NOT NULL,
+                           UNIQUE(
+                               verification_id, result_type, subject_key, round
+                           )
+                       )"""
+                )
+                connection.execute(
+                    """INSERT INTO official_municipality_results(
+                           id, verification_id, result_type, subject,
+                           subject_key, round, votes, percentage, seats,
+                           payload_json
+                       )
+                       SELECT id, verification_id, result_type, subject,
+                              subject_key, -1, votes, percentage, seats,
+                              payload_json
+                         FROM official_municipality_results_legacy"""
+                )
+                connection.execute(
+                    "DROP TABLE official_municipality_results_legacy"
+                )
+                connection.execute(
+                    """CREATE INDEX idx_official_municipality_results_lookup
+                       ON official_municipality_results(
+                           verification_id, result_type, subject_key, round
+                       )"""
+                )
+            legacy = connection.execute(
+                """SELECT v.id, v.payload_json
+                     FROM official_municipality_verifications v
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM official_municipality_results r
+                         WHERE r.verification_id=v.id
+                    )"""
+            ).fetchall()
+            for verification in legacy:
+                payload = json.loads(verification["payload_json"])
+                results = payload.get("risultati_ufficiali") or [
+                    {
+                        "tipo_risultato": "list",
+                        "soggetto": row["partito_ufficiale"],
+                        "voti": row["voti_ufficiali"],
+                        "percentuale": None,
+                        "seggi": None,
+                    }
+                    for row in payload.get("partiti", [])
+                    if row.get("partito_ufficiale") is not None
+                ]
+                connection.executemany(
+                    """INSERT OR IGNORE INTO official_municipality_results(
+                           verification_id, result_type, subject, subject_key,
+                           round, votes, percentage, seats, payload_json
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    [
+                        (
+                            verification["id"],
+                            row["tipo_risultato"],
+                            row["soggetto"],
+                            slug(row["soggetto"]),
+                            row.get("turno") or -1,
+                            row.get("voti"),
+                            row.get("percentuale"),
+                            row.get("seggi"),
+                            json.dumps(row, ensure_ascii=False),
+                        )
+                        for row in results
+                    ],
+                )
             connection.commit()
 
     def store_snapshot(self, result: PageResult) -> int:
@@ -206,6 +350,16 @@ class Database:
             connection.commit()
             return int(cursor.lastrowid)
 
+    def latest_snapshot(self, source_url: str) -> PageResult | None:
+        """Return the newest parsed page for a URL without another web request."""
+        with closing(self.connect()) as connection:
+            row = connection.execute(
+                """SELECT payload_json FROM page_snapshots
+                   WHERE source_url=? ORDER BY retrieved_at DESC, id DESC LIMIT 1""",
+                (source_url,),
+            ).fetchone()
+        return PageResult.model_validate_json(row["payload_json"]) if row else None
+
     def store_official_municipality_verification(
         self, result: dict[str, Any]
     ) -> int:
@@ -214,7 +368,7 @@ class Database:
         }
         verified_at = datetime.now(timezone.utc).isoformat()
         with closing(self.connect()) as connection:
-            cursor = connection.execute(
+            connection.execute(
                 """
                 INSERT INTO official_municipality_verifications(
                     category, election_date, municipality, municipality_key,
@@ -256,8 +410,332 @@ class Database:
                     json.dumps(result, ensure_ascii=False, default=str),
                 ),
             )
+            verification_id = int(
+                connection.execute(
+                    """SELECT id FROM official_municipality_verifications
+                       WHERE category=? AND election_date=? AND municipality_key=?""",
+                    (
+                        result["tipo_elezione"],
+                        result["data"].isoformat(),
+                        (
+                            f"p:{slug(result['provincia'])}|{slug(result['comune'])}"
+                            if result.get("provincia")
+                            else f"r:{slug(result['regione'])}|{slug(result['comune'])}"
+                            if result.get("regione")
+                            else slug(result["comune"])
+                        ),
+                    ),
+                ).fetchone()["id"]
+            )
+            connection.execute(
+                "DELETE FROM official_municipality_results WHERE verification_id=?",
+                (verification_id,),
+            )
+            connection.executemany(
+                """INSERT INTO official_municipality_results(
+                       verification_id, result_type, subject, subject_key,
+                       round, votes, percentage, seats, payload_json
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    (
+                        verification_id,
+                        row["tipo_risultato"],
+                        row["soggetto"],
+                        slug(row["soggetto"]),
+                        row.get("turno") or -1,
+                        row.get("voti"),
+                        row.get("percentuale"),
+                        row.get("seggi"),
+                        json.dumps(row, ensure_ascii=False),
+                    )
+                    for row in result.get("risultati_ufficiali", [])
+                ],
+            )
+            connection.execute(
+                """UPDATE official_verification_queue
+                      SET status=?, attempts=attempts+1, source_urls_json=?,
+                          last_error=NULL, updated_at=?
+                    WHERE category=? AND election_date=?
+                      AND municipality_key=?""",
+                (
+                    "verified" if result["insieme_completo"] else "partial",
+                    json.dumps(result["source_urls"], ensure_ascii=False),
+                    verified_at,
+                    result["tipo_elezione"],
+                    result["data"].isoformat(),
+                    (
+                        f"p:{slug(result['provincia'])}|{slug(result['comune'])}"
+                        if result.get("provincia")
+                        else f"r:{slug(result['regione'])}|{slug(result['comune'])}"
+                        if result.get("regione")
+                        else slug(result["comune"])
+                    ),
+                ),
+            )
             connection.commit()
-            return int(cursor.lastrowid)
+            return verification_id
+
+    @staticmethod
+    def _geography_municipality_key(
+        municipality: str, province: str | None, region: str | None
+    ) -> str:
+        base = slug(municipality)
+        if province:
+            return f"p:{slug(province)}|{base}"
+        if region:
+            return f"r:{slug(region)}|{base}"
+        return base
+
+    def seed_official_verification_queue(
+        self, *, category: str, election_date: date
+    ) -> int:
+        """Create resumable municipality work items from imported ZIP rows."""
+        with closing(self.connect()) as connection:
+            rows = connection.execute(
+                """SELECT region, province, municipality, round,
+                          MAX(COALESCE(voters, 0)) AS voters,
+                          COUNT(DISTINCT college) AS college_parts
+                     FROM election_results
+                    WHERE category=? AND election_date=?
+                      AND municipality IS NOT NULL
+                    GROUP BY region, province, municipality, round""",
+                (category, election_date.isoformat()),
+            ).fetchall()
+            now = datetime.now(timezone.utc).isoformat()
+            work: dict[tuple[int | None, str], tuple[Any, ...]] = {}
+            for row in rows:
+                municipality = canonical_municipality(row["municipality"])
+                if not municipality:
+                    continue
+                municipality_key = self._geography_municipality_key(
+                    municipality, row["province"], row["region"]
+                )
+                priority = min(int(row["voters"] or 0) // 10_000, 100)
+                if municipality != row["municipality"] or row["college_parts"] > 1:
+                    priority += 1000
+                round_number = int(row["round"]) if row["round"] is not None else -1
+                key = (round_number, municipality_key)
+                candidate = (
+                    category,
+                    election_date.isoformat(),
+                    round_number,
+                    row["region"],
+                    row["province"],
+                    municipality,
+                    municipality_key,
+                    priority,
+                    now,
+                )
+                previous = work.get(key)
+                if previous is None or candidate[7] > previous[7]:
+                    work[key] = candidate
+            before = connection.total_changes
+            connection.executemany(
+                """INSERT INTO official_verification_queue(
+                       category, election_date, round, region, province,
+                       municipality, municipality_key, priority, updated_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(category, election_date, round, municipality_key)
+                   DO UPDATE SET
+                       region=COALESCE(excluded.region, region),
+                       province=COALESCE(excluded.province, province),
+                       municipality=excluded.municipality,
+                       priority=MAX(priority, excluded.priority),
+                       updated_at=excluded.updated_at""",
+                work.values(),
+            )
+            connection.execute(
+                """UPDATE official_verification_queue AS q
+                      SET status=(
+                              SELECT CASE WHEN v.complete_set=1
+                                          THEN 'verified' ELSE 'partial' END
+                                FROM official_municipality_verifications v
+                               WHERE v.category=q.category
+                                 AND v.election_date=q.election_date
+                                 AND v.municipality_key=q.municipality_key
+                          ),
+                          source_urls_json=(
+                              SELECT v.source_urls_json
+                                FROM official_municipality_verifications v
+                               WHERE v.category=q.category
+                                 AND v.election_date=q.election_date
+                                 AND v.municipality_key=q.municipality_key
+                          ),
+                          updated_at=(
+                              SELECT v.verified_at
+                                FROM official_municipality_verifications v
+                               WHERE v.category=q.category
+                                 AND v.election_date=q.election_date
+                                 AND v.municipality_key=q.municipality_key
+                          )
+                    WHERE q.category=? AND q.election_date=?
+                      AND EXISTS (
+                              SELECT 1 FROM official_municipality_verifications v
+                               WHERE v.category=q.category
+                                 AND v.election_date=q.election_date
+                                 AND v.municipality_key=q.municipality_key
+                          )""",
+                (category, election_date.isoformat()),
+            )
+            legacy_verifications = connection.execute(
+                """SELECT municipality_key, complete_set, source_urls_json,
+                          verified_at
+                     FROM official_municipality_verifications
+                    WHERE category=? AND election_date=?
+                      AND instr(municipality_key, ':')=0""",
+                (category, election_date.isoformat()),
+            ).fetchall()
+            for verification in legacy_verifications:
+                matches = connection.execute(
+                    """SELECT id FROM official_verification_queue
+                       WHERE category=? AND election_date=?
+                         AND (municipality_key=? OR municipality_key LIKE ?)""",
+                    (
+                        category,
+                        election_date.isoformat(),
+                        verification["municipality_key"],
+                        f"%|{verification['municipality_key']}",
+                    ),
+                ).fetchall()
+                if len(matches) == 1:
+                    connection.execute(
+                        """UPDATE official_verification_queue
+                              SET status=?, source_urls_json=?, updated_at=?
+                            WHERE id=?""",
+                        (
+                            "verified" if verification["complete_set"] else "partial",
+                            verification["source_urls_json"],
+                            verification["verified_at"],
+                            matches[0]["id"],
+                        ),
+                    )
+            inserted_or_updated = connection.total_changes - before
+            connection.commit()
+            return inserted_or_updated
+
+    def official_verification_queue(
+        self,
+        *,
+        category: str | None,
+        election_date: date | None,
+        status: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[int, list[dict[str, Any]]]:
+        clauses = ["1=1"]
+        parameters: list[Any] = []
+        if category:
+            clauses.append("category=?")
+            parameters.append(category)
+        if election_date:
+            clauses.append("election_date=?")
+            parameters.append(election_date.isoformat())
+        if status:
+            clauses.append("status=?")
+            parameters.append(status)
+        where = " AND ".join(clauses)
+        with closing(self.connect()) as connection:
+            count = int(
+                connection.execute(
+                    f"SELECT COUNT(*) AS n FROM official_verification_queue WHERE {where}",
+                    parameters,
+                ).fetchone()["n"]
+            )
+            rows = connection.execute(
+                f"""SELECT * FROM official_verification_queue
+                     WHERE {where}
+                     ORDER BY priority DESC, election_date, category, municipality
+                     LIMIT ? OFFSET ?""",
+                [*parameters, limit, offset],
+            ).fetchall()
+        return count, [
+            {
+                "id": row["id"],
+                "tipo_elezione": row["category"],
+                "data": row["election_date"],
+                "turno": None if row["round"] == -1 else row["round"],
+                "regione": row["region"],
+                "provincia": row["province"],
+                "comune": row["municipality"],
+                "priorita": row["priority"],
+                "stato": row["status"],
+                "tentativi": row["attempts"],
+                "fonti": json.loads(row["source_urls_json"]),
+                "ultimo_errore": row["last_error"],
+                "aggiornato_il": row["updated_at"],
+            }
+            for row in rows
+        ]
+
+    def store_reconciliation_run(
+        self,
+        *,
+        category: str,
+        election_date: date,
+        status: str,
+        result: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with closing(self.connect()) as connection:
+            existing = connection.execute(
+                """SELECT started_at FROM official_reconciliation_runs
+                   WHERE category=? AND election_date=?""",
+                (category, election_date.isoformat()),
+            ).fetchone()
+            started_at = (
+                now if status == "running" or existing is None else existing["started_at"]
+            )
+            completed_at = now if status in {"complete", "unavailable", "failed"} else None
+            connection.execute(
+                """INSERT INTO official_reconciliation_runs(
+                       category, election_date, status, started_at,
+                       completed_at, result_json, last_error
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(category, election_date) DO UPDATE SET
+                       status=excluded.status,
+                       started_at=excluded.started_at,
+                       completed_at=excluded.completed_at,
+                       result_json=excluded.result_json,
+                       last_error=excluded.last_error""",
+                (
+                    category,
+                    election_date.isoformat(),
+                    status,
+                    started_at,
+                    completed_at,
+                    json.dumps(result or {}, ensure_ascii=False),
+                    error,
+                ),
+            )
+            connection.commit()
+
+    def reconciliation_run_statuses(self) -> dict[tuple[str, str], str]:
+        with closing(self.connect()) as connection:
+            rows = connection.execute(
+                "SELECT category, election_date, status FROM official_reconciliation_runs"
+            ).fetchall()
+        return {
+            (row["category"], row["election_date"]): row["status"] for row in rows
+        }
+
+    def imported_elections(
+        self, categories: tuple[str, ...]
+    ) -> list[tuple[str, date]]:
+        """List election/category pairs that have normalised ZIP results."""
+        placeholders = ",".join("?" for _ in categories)
+        with closing(self.connect()) as connection:
+            rows = connection.execute(
+                f"""SELECT DISTINCT category, election_date
+                       FROM election_results
+                      WHERE category IN ({placeholders})
+                      ORDER BY election_date, category""",
+                categories,
+            ).fetchall()
+        return [
+            (row["category"], date.fromisoformat(row["election_date"]))
+            for row in rows
+        ]
 
     def official_municipality_verifications(
         self,
@@ -1003,8 +1481,12 @@ class Database:
             raise ValueError(
                 "voter_tolerance must be greater than or equal to 0 and below 1."
             )
+        requested_categories = categories
+        reference_categories = tuple(
+            dict.fromkeys((*categories, "camera", "senato"))
+        )
         municipality_key = slug(municipality)
-        placeholders = ",".join("?" for _ in categories)
+        placeholders = ",".join("?" for _ in reference_categories)
         legacy_keys = (
             f"parte_di_comune_{municipality_key}",
             f"parte_di_comune_di_{municipality_key}",
@@ -1056,7 +1538,7 @@ class Database:
                     municipality_key,
                     f"{municipality_key}_%",
                     *legacy_keys,
-                    *categories,
+                    *reference_categories,
                     *geography_parameters,
                 ),
             ).fetchall()
@@ -1082,6 +1564,7 @@ class Database:
                     "comune": municipality,
                     "fonte_file": unit["source_file"],
                     "tipo_risultato": unit["result_type"],
+                    "turno": unit["round"],
                     "parti_rilevate": 0,
                     "aventi_diritto": 0,
                     "votanti": 0,
@@ -1127,7 +1610,7 @@ class Database:
 
         official = self.official_municipality_verifications(
             municipality=municipality,
-            categories=categories,
+            categories=reference_categories,
             province=province,
             region=region,
         )
@@ -1178,7 +1661,15 @@ class Database:
             vote_ratio = (
                 round(votes / electors, 6) if electors not in (None, 0) else None
             )
-            references = [
+            same_date_elector_references = [
+                (other_date, other)
+                for other_date, other in dated
+                if other is not row
+                and other_date == current_date
+                and other["tipo_elezione"] != row["tipo_elezione"]
+                and other["aventi_diritto"] not in (None, 0)
+            ]
+            adjacent_elector_references = [
                 (other_date, other)
                 for other_date, other in dated
                 if other is not row
@@ -1186,28 +1677,70 @@ class Database:
                 and other["aventi_diritto"] not in (None, 0)
             ]
             reference_date = None
+            reference_category = None
+            reference_method = None
             reference_electors = None
             reference_ratio = None
-            if references:
+            if same_date_elector_references:
+                reference_date, reference = same_date_elector_references[0]
+                reference_category = reference["tipo_elezione"]
+                reference_method = "same_date_other_chamber"
+            elif adjacent_elector_references:
                 reference_date, reference = min(
-                    references,
+                    adjacent_elector_references,
                     key=lambda item: abs((item[0] - current_date).days),
                 )
+                reference_category = reference["tipo_elezione"]
+                reference_method = "adjacent_same_chamber"
+            else:
+                reference = None
+            if reference is not None:
                 reference_electors = int(reference["aventi_diritto"])
                 if electors is not None:
                     reference_ratio = round(electors / reference_electors, 6)
 
-            voter_references = [
+            same_date_voter_references = [
+                (other_date, other)
+                for other_date, other in dated
+                if other is not row
+                and other_date == current_date
+                and other["tipo_elezione"] != row["tipo_elezione"]
+                and other["votanti"] not in (None, 0)
+            ]
+            adjacent_voter_references = [
                 (other_date, other)
                 for other_date, other in dated
                 if other is not row
                 and other["tipo_elezione"] == row["tipo_elezione"]
                 and other["votanti"] not in (None, 0)
             ]
-            previous = [item for item in voter_references if item[0] < current_date]
-            following = [item for item in voter_references if item[0] > current_date]
-            previous_date, previous_row = max(previous, default=(None, None))
-            next_date, next_row = min(following, default=(None, None))
+            same_date_category = None
+            same_date_voters = None
+            same_date_voter_ratio = None
+            if same_date_voter_references:
+                _, same_date_row = same_date_voter_references[0]
+                same_date_category = same_date_row["tipo_elezione"]
+                same_date_voters = int(same_date_row["votanti"])
+                if voters not in (None, 0):
+                    same_date_voter_ratio = round(voters / same_date_voters, 6)
+                comparison_method = "same_date_other_chamber"
+                previous_date = previous_row = next_date = next_row = None
+            else:
+                previous = [
+                    item for item in adjacent_voter_references
+                    if item[0] < current_date
+                ]
+                following = [
+                    item for item in adjacent_voter_references
+                    if item[0] > current_date
+                ]
+                previous_date, previous_row = max(previous, default=(None, None))
+                next_date, next_row = min(following, default=(None, None))
+                comparison_method = (
+                    "adjacent_same_chamber"
+                    if previous_row is not None or next_row is not None
+                    else None
+                )
             previous_voters = (
                 int(previous_row["votanti"]) if previous_row is not None else None
             )
@@ -1222,11 +1755,15 @@ class Database:
                 if voters not in (None, 0) and next_voters not in (None, 0)
                 else None
             )
-            voter_ratios = [
-                ratio
-                for ratio in (previous_voter_ratio, next_voter_ratio)
-                if ratio is not None
-            ]
+            voter_ratios = (
+                [same_date_voter_ratio]
+                if same_date_voter_ratio is not None
+                else [
+                    ratio
+                    for ratio in (previous_voter_ratio, next_voter_ratio)
+                    if ratio is not None
+                ]
+            )
             voters_comparable = (
                 all(
                     1 - voter_tolerance <= ratio <= 1 + voter_tolerance
@@ -1274,8 +1811,14 @@ class Database:
                     "data_riferimento": (
                         reference_date.isoformat() if reference_date else None
                     ),
+                    "tipo_elezione_riferimento": reference_category,
+                    "metodo_riferimento": reference_method,
                     "aventi_diritto_riferimento": reference_electors,
                     "rapporto_aventi_diritto_riferimento": reference_ratio,
+                    "metodo_confronto_votanti": comparison_method,
+                    "tipo_elezione_stessa_data": same_date_category,
+                    "votanti_stessa_data": same_date_voters,
+                    "rapporto_votanti_stessa_data": same_date_voter_ratio,
                     "data_precedente": (
                         previous_date.isoformat() if previous_date else None
                     ),
@@ -1297,7 +1840,137 @@ class Database:
                     "stato": status,
                 }
             )
-        return sorted(selected, key=lambda row: (row["data"], row["tipo_elezione"]))
+        return sorted(
+            (
+                row
+                for row in selected
+                if row["tipo_elezione"] in requested_categories
+            ),
+            key=lambda row: (row["data"], row["tipo_elezione"]),
+        )
+
+    def municipality_election_layer(
+        self,
+        *,
+        municipality: str,
+        category: str,
+        election_date: date,
+        province: str | None = None,
+        region: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return one local election layer without rebuilding adjacent history."""
+        municipality_key = slug(municipality)
+        legacy_keys = (
+            f"parte_di_comune_{municipality_key}",
+            f"parte_di_comune_di_{municipality_key}",
+            f"parte_del_comune_di_{municipality_key}",
+        )
+        if municipality_key == "reggio_calabria":
+            legacy_keys = (
+                *legacy_keys,
+                "parte_di_comune_reggio_di_calabria",
+                "parte_del_comune_di_reggio_di_calabria",
+            )
+        legacy_placeholders = ",".join("?" for _ in legacy_keys)
+        geography_clause = ""
+        geography_parameters: list[str] = []
+        if province:
+            geography_clause = "AND e.province = ? COLLATE NOCASE"
+            geography_parameters.append(province)
+        elif region:
+            geography_clause = "AND e.region = ? COLLATE NOCASE"
+            geography_parameters.append(region)
+        with closing(self.connect()) as connection:
+            units = connection.execute(
+                f"""SELECT e.catalogue_id, e.source_file, e.result_type,
+                           e.round, e.municipality,
+                           COALESCE(e.college, '') AS college,
+                           COALESCE(e.constituency, '') AS constituency,
+                           MAX(e.electors) AS electors,
+                           MAX(e.voters) AS voters,
+                           SUM(e.votes) AS result_votes
+                      FROM election_results e
+                     WHERE e.category=? AND e.election_date=?
+                       AND (
+                           e.municipality_key = ?
+                           OR e.municipality_key LIKE ?
+                           OR e.municipality_key IN ({legacy_placeholders})
+                       )
+                       {geography_clause}
+                     GROUP BY e.catalogue_id, e.source_file, e.result_type,
+                              e.round, e.municipality,
+                              COALESCE(e.college, ''),
+                              COALESCE(e.constituency, '')
+                     ORDER BY e.source_file, e.result_type, e.round, college""",
+                (
+                    category,
+                    election_date.isoformat(),
+                    municipality_key,
+                    f"{municipality_key}_%",
+                    *legacy_keys,
+                    *geography_parameters,
+                ),
+            ).fetchall()
+
+        layers: dict[tuple[Any, ...], dict[str, Any]] = {}
+        for unit in units:
+            canonical = canonical_municipality(unit["municipality"])
+            if slug(canonical or "") != municipality_key:
+                continue
+            key = (
+                unit["catalogue_id"],
+                unit["source_file"],
+                unit["result_type"],
+                unit["round"],
+            )
+            layer = layers.setdefault(
+                key,
+                {
+                    "tipo_elezione": category,
+                    "data": election_date.isoformat(),
+                    "comune": municipality,
+                    "fonte_file": unit["source_file"],
+                    "tipo_risultato": unit["result_type"],
+                    "turno": unit["round"],
+                    "parti_rilevate": 0,
+                    "aventi_diritto": 0,
+                    "votanti": 0,
+                    "voti_risultato": 0,
+                    "_complete_electors": True,
+                    "_complete_voters": True,
+                },
+            )
+            layer["parti_rilevate"] += 1
+            if unit["electors"] is None:
+                layer["_complete_electors"] = False
+            else:
+                layer["aventi_diritto"] += int(unit["electors"])
+            if unit["voters"] is None:
+                layer["_complete_voters"] = False
+            else:
+                layer["votanti"] += int(unit["voters"])
+            layer["voti_risultato"] += int(unit["result_votes"] or 0)
+
+        candidates = []
+        for layer in layers.values():
+            if not layer.pop("_complete_electors"):
+                layer["aventi_diritto"] = None
+            if not layer.pop("_complete_voters"):
+                layer["votanti"] = None
+            candidates.append(layer)
+        if not candidates:
+            return None
+        return max(
+            candidates,
+            key=lambda row: (
+                row["turno"] == 1,
+                row["turno"] is None,
+                row["aventi_diritto"] is not None,
+                row["tipo_risultato"] == "list",
+                row["votanti"] is not None,
+                row["voti_risultato"],
+            ),
+        )
 
     def municipality_party_totals(
         self,
@@ -1307,6 +1980,7 @@ class Database:
         election_date: date,
         source_file: str,
         result_type: str,
+        round_number: int | None = None,
         province: str | None = None,
         region: str | None = None,
     ) -> list[dict[str, Any]]:
@@ -1332,6 +2006,11 @@ class Database:
         elif region:
             geography_clause = "AND region = ? COLLATE NOCASE"
             geography_parameters.append(region)
+        round_clause = ""
+        round_parameters: list[int] = []
+        if round_number is not None:
+            round_clause = "AND round = ?"
+            round_parameters.append(round_number)
         with closing(self.connect()) as connection:
             rows = connection.execute(
                 f"""
@@ -1346,6 +2025,7 @@ class Database:
                   AND election_date = ?
                   AND source_file = ?
                   AND result_type = ?
+                  {round_clause}
                   {geography_clause}
                 ORDER BY subject, municipality
                 """,
@@ -1357,6 +2037,7 @@ class Database:
                     election_date.isoformat(),
                     source_file,
                     result_type,
+                    *round_parameters,
                     *geography_parameters,
                 ),
             ).fetchall()

@@ -26,6 +26,7 @@ class ResultRecord(BaseModel):
     record_id: str | None = None
     parent_id: str | None = None
     name: str
+    round: int | None = None
     status: str | None = None
     votes: int | None = None
     percentage: float | None = None
@@ -92,7 +93,7 @@ class OfficialMunicipalityVerificationResponse(BaseModel):
     source_urls: list[str]
     pagine_ufficiali: int
     insieme_completo: bool
-    tipo_elezione: Literal["camera", "senato"]
+    tipo_elezione: Literal["camera", "senato", "europee", "regionali", "comunali"]
     data: date
     regione: str | None = None
     circoscrizione: str | None = None
@@ -110,6 +111,35 @@ class OfficialMunicipalityVerificationResponse(BaseModel):
     partiti_coincidenti: int
     partiti_non_coincidenti: int
     partiti: list[OfficialPartyComparison]
+    risultati_ufficiali: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class OfficialVerificationQueueSeedRequest(BaseModel):
+    tipo_elezione: Literal["camera", "senato", "europee", "regionali", "comunali"]
+    data: date
+
+
+class OfficialVerificationQueueRow(BaseModel):
+    id: int
+    tipo_elezione: str
+    data: date
+    turno: int | None = None
+    regione: str | None = None
+    provincia: str | None = None
+    comune: str
+    priorita: int
+    stato: Literal["pending", "partial", "verified", "failed"]
+    tentativi: int
+    fonti: list[str]
+    ultimo_errore: str | None = None
+    aggiornato_il: datetime
+
+
+class OfficialVerificationQueueResponse(BaseModel):
+    count: int
+    limit: int
+    offset: int
+    rows: list[OfficialVerificationQueueRow]
 
 
 class CatalogueEntry(BaseModel):
@@ -413,8 +443,18 @@ class MunicipalityAuditRow(BaseModel):
     verifica_ufficiale_data: datetime | None = None
     rapporto_voti_aventi_diritto: float | None = None
     data_riferimento: date | None = None
+    tipo_elezione_riferimento: str | None = None
+    metodo_riferimento: Literal[
+        "same_date_other_chamber", "adjacent_same_chamber"
+    ] | None = None
     aventi_diritto_riferimento: int | None = None
     rapporto_aventi_diritto_riferimento: float | None = None
+    metodo_confronto_votanti: Literal[
+        "same_date_other_chamber", "adjacent_same_chamber"
+    ] | None = None
+    tipo_elezione_stessa_data: str | None = None
+    votanti_stessa_data: int | None = None
+    rapporto_votanti_stessa_data: float | None = None
     data_precedente: date | None = None
     votanti_precedenti: int | None = None
     rapporto_votanti_precedenti: float | None = None

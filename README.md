@@ -190,10 +190,12 @@ retained as the official PDFs. Existing files are reused unless
 GET /api/v1/history/audit/municipality?comune=ROMA&provincia=ROMA
 ```
 
-The audit reconstructs municipality totals across every reported college,
-checks votes against voters and electors, and compares voters with both the
-previous and following election of the same chamber. The default tolerance is
-35 per cent and can be changed with `tolleranza_votanti=0.25`, for example.
+The audit reconstructs municipality totals across every reported college and
+checks votes against voters and electors. It first compares turnout with the
+other chamber when a municipality result exists on the same election date.
+Only when that same-date comparison is unavailable does it use the previous
+and following election of the same chamber. The default tolerance is 35 per
+cent and can be changed with `tolleranza_votanti=0.25`, for example.
 `parti_rilevate` records the number of college fragments found,
 `mappa_collegi_versione` identifies the applicable territorial version, and
 `fonti_confini_urls` links every base instrument and correction. Use
@@ -252,12 +254,124 @@ makes 37 of Rome's 38 Chamber/Senate audit rows pass; the 2006 Senate row
 retains `insufficient_data` because its source omits the required metadata.
 
 This gives official municipality pages priority as a direct validation source.
-The adjacent-election test remains a diagnostic fallback for cases where a
-complete set of municipality pages has not yet been collected.
+The same-date other-chamber test, followed by the adjacent same-chamber test,
+remains a diagnostic fallback for cases where a complete set of municipality
+pages has not yet been collected.
+
+### Seed and monitor the reconciliation queue
+
+After importing a ZIP, create one resumable work item per reconstructed
+municipality. Split labels such as `ROMA I` and `ROMA II` are canonicalised to
+one municipality and assigned a higher priority:
+
+```powershell
+$body = @{
+  tipo_elezione = "camera"
+  data = "1958-05-25"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8000/api/v1/history/reconciliation/queue `
+  -ContentType application/json -Body $body
+
+Invoke-RestMethod `
+  -Uri "http://127.0.0.1:8000/api/v1/history/reconciliation/queue?stato=pending"
+```
+
+The queue is idempotent. A stored complete website verification marks its work
+item `verified`; an incomplete component set marks it `partial`. Website result
+rows are stored separately from ZIP rows, so the original archive remains
+unchanged while complete official results can become the authoritative layer.
+
+Run one election through the official selector hierarchy with the resumable
+command below. Municipality pages already present in `page_snapshots` are read
+from the local cache. `--max-requests` is useful for a controlled pilot; omit it
+only when the complete election should be traversed.
+
+```powershell
+$env:ELIGENDO_REQUEST_INTERVAL_SECONDS = "0.8"
+eligendo-reconcile `
+  --category camera `
+  --date 2022-09-25 `
+  --database data/eligendo.sqlite3 `
+  --max-requests 100
+```
+
+The crawler reads the Ministry's encoded selector values rather than inventing
+territorial codes. It groups every leaf page by province/region and canonical
+municipality before declaring a component set complete.
+It also reads first- and second-round columns separately when both are present
+on a municipal page.
 When the source identifies neither province nor region, the verifier refuses
 the comparison rather than inferring geography from a municipality name.
 Set `complete_set=true` only after confirming that the URLs represent every
 component of the same historical municipality.
+
+To reconcile every imported Camera, Senato, European, regional, and municipal
+election, run:
+
+```powershell
+$env:ELIGENDO_REQUEST_INTERVAL_SECONDS = "0.8"
+eligendo-reconcile-all --database data/eligendo.sqlite3
+```
+
+The command processes elections sequentially and records each election as
+`complete`, `partial`, `unavailable`, or `failed`. Re-running the same command
+skips `complete` and `unavailable` elections and resumes the remaining work.
+Use `--categories camera senato` to restrict the run or `--max-elections 1`
+for a pilot. `--retry-complete` deliberately repeats terminal elections.
+
+Transient DNS, connection, rate-limit, and server failures use exponential
+backoff and keep retrying the current page. A permanent page error stops the
+run at the current election instead of continuing with a knowingly incomplete
+page set; restarting reuses every municipality page already cached locally.
+
+Before following the selector hierarchy, the crawler compares the election
+name and date rendered in the Ministry page with the requested election. This
+prevents placeholder or unavailable dates from silently returning a different
+election and contaminating the local database.
+
+### Run from any OneDrive-connected machine
+
+Keep the Git repository and the shared data store separate. The repository
+contains code, schema migrations, tests, and launch scripts. The OneDrive data
+store contains the portable SQLite checkpoint, runtime logs, and any downloaded
+source artifacts. The active SQLite database is restored to a local working
+directory before the crawler starts; SQLite must not be written directly inside
+a synchronised OneDrive folder.
+
+On each machine, clone the repository, install it, and point the launcher at
+the locally synced `ElectionData` folder:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+
+$env:ELIGENDO_SHARED_DATA_DIR = `
+  "C:\Users\YOUR-NAME\OneDrive - London South Bank University\Research\ElectionData"
+.\scripts\run_portable.ps1 -Python ".\.venv\Scripts\python.exe"
+```
+
+The launcher verifies the shared SHA-256 manifest, restores a local working
+copy below `%LOCALAPPDATA%\Eligendo`, resumes the queue, and publishes a new
+consistent OneDrive checkpoint every six hours and on normal exit. Run the
+writer on only one machine at a time. The SQLite checkpoint, rather than the
+text log, contains the authoritative resume state.
+
+Manual checkpoint operations are also available:
+
+```powershell
+eligendo-data status --store $env:ELIGENDO_SHARED_DATA_DIR
+eligendo-data checkout --store $env:ELIGENDO_SHARED_DATA_DIR `
+  --database "$env:LOCALAPPDATA\Eligendo\eligendo.sqlite3"
+eligendo-data checkpoint `
+  --database "$env:LOCALAPPDATA\Eligendo\eligendo.sqlite3" `
+  --store $env:ELIGENDO_SHARED_DATA_DIR
+```
+
+See [Portable data workflow](docs/DATA_PORTABILITY.md) for the directory
+layout, transfer rules, recovery procedure, and integrity guarantees.
 
 ## Municipal results by year
 
@@ -411,6 +525,8 @@ linking them to their candidate.
 | `GET` | `/api/v1/history/audit/municipality` | Reconstruct and sense-check a split municipality |
 | `POST` | `/api/v1/history/audit/official-municipality-page` | Compare one official municipality page with reconstructed totals |
 | `POST` | `/api/v1/history/audit/official-municipality-pages` | Aggregate split official pages and compare them with reconstructed totals |
+| `POST` | `/api/v1/history/reconciliation/queue` | Seed resumable municipality checks from imported ZIP results |
+| `GET` | `/api/v1/history/reconciliation/queue` | Monitor pending, partial, verified, and failed checks |
 | `GET` | `/api/v1/legal/electoral-laws` | List official electoral laws and boundary instruments |
 | `GET` | `/api/v1/legal/district-maps` | List time-versioned district maps and official source links |
 | `POST` | `/api/v1/legal/electoral-laws/download` | Download, bundle, and hash legal sources |
