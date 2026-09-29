@@ -10,6 +10,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import shutil
 
 
 DATABASE_NAME = "eligendo.sqlite3"
@@ -132,8 +133,9 @@ def checkout_database(store: Path, database: Path) -> dict[str, Any]:
     temporary = Path(temporary_name)
     temporary.unlink()
     try:
-        _sqlite_backup(source, temporary)
+        shutil.copy2(source, temporary)
         _quick_check(temporary)
+
         if file_sha256(temporary) != source_digest:
             raise RuntimeError("Restored working database checksum differs from checkpoint")
         os.replace(temporary, database)
