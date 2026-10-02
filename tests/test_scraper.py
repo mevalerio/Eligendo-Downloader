@@ -102,3 +102,16 @@ def test_parse_two_round_municipal_page() -> None:
     assert result.summary["elettori"] == 2363776
     assert result.summary["elettori_turno_2"] == 2363776
     assert result.summary["votanti_turno_2"] == 1185280
+
+
+def test_parse_heading_keeps_college_level() -> None:
+    html = HTML.replace(
+        "Provincia FROSINONE <i></i> Comune CASSINO",
+        "Collegio Roma - Ciampino <i></i> Comune parte del comune di Roma",
+    )
+
+    result = parse_page_html(html, URL)
+
+    assert result.geography.collegio == "Roma - Ciampino"
+    assert result.geography.comune == "parte del comune di Roma"
+    assert result.geography.provincia is None

@@ -583,6 +583,7 @@ def audit_municipality_history(
     tolleranza_votanti: Annotated[float, Query(ge=0.05, le=0.80)] = 0.35,
     provincia: str | None = None,
     regione: str | None = None,
+    circoscrizione: str | None = None,
 ) -> MunicipalityAuditResponse:
     """Sense-check reconstructed national-election municipality totals."""
     if category not in (None, "camera", "senato"):
@@ -594,6 +595,7 @@ def audit_municipality_history(
         voter_tolerance=tolleranza_votanti,
         province=provincia,
         region=regione,
+        constituency=circoscrizione,
     )
     counts = {
         status: sum(row["stato"] == status for row in rows)
@@ -603,6 +605,7 @@ def audit_municipality_history(
         comune=comune,
         provincia=provincia,
         regione=regione,
+        circoscrizione=circoscrizione,
         categories=list(categories),
         voter_tolerance=tolleranza_votanti,
         elections_checked=len(rows),

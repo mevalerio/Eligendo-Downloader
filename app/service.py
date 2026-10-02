@@ -25,7 +25,7 @@ from .schemas import (
     PageResult,
 )
 from .scraper import parse_page_html
-from .utils import slug
+from .utils import canonical_municipality, slug
 
 
 OFFICIAL_PAGE_CATEGORIES = {
@@ -146,13 +146,26 @@ class EligendoService:
                 "Official municipality verification supports Camera, Senato, "
                 "Europee, Regionali, and Comunali pages."
             )
-        municipality = page.geography.comune
+        # Split cities publish one page per college piece with labels such as
+        # "Roma centro" or "Parte di Comune ROMA"; compare the parent municipality.
+        municipality = canonical_municipality(page.geography.comune)
         if not municipality:
             raise ValueError("The official URL must identify one municipality.")
-        if not (page.geography.provincia or page.geography.regione):
+        if not (
+            page.geography.provincia
+            or page.geography.regione
+            or page.geography.circoscrizione
+        ):
             raise ValueError(
-                "The official page must identify a province or region for a safe comparison."
+                "The official page must identify a province, region, or "
+                "constituency for a safe comparison."
             )
+        # Chamber pages for 1994-2001 publish only the constituency.
+        constituency = (
+            None
+            if page.geography.provincia or page.geography.regione
+            else page.geography.circoscrizione
+        )
         for component in pages[1:]:
             component_category = OFFICIAL_PAGE_CATEGORIES.get(
                 (component.election.code or "").upper()
@@ -161,12 +174,18 @@ class EligendoService:
                 raise ValueError("All official pages must use the same chamber.")
             if component.election.date != page.election.date:
                 raise ValueError("All official pages must use the same election date.")
-            if slug(component.geography.comune or "") != slug(municipality):
+            if slug(canonical_municipality(component.geography.comune) or "") != slug(
+                municipality
+            ):
                 raise ValueError("All official pages must identify the same municipality.")
             if slug(component.geography.provincia or "") != slug(page.geography.provincia or ""):
                 raise ValueError("All official pages must identify the same province.")
             if slug(component.geography.regione or "") != slug(page.geography.regione or ""):
                 raise ValueError("All official pages must identify the same region.")
+            if slug(component.geography.circoscrizione or "") != slug(
+                page.geography.circoscrizione or ""
+            ):
+                raise ValueError("All official pages must identify the same constituency.")
 
         audit = self.database.municipality_election_layer(
             municipality=municipality,
@@ -174,6 +193,7 @@ class EligendoService:
             election_date=page.election.date,
             province=page.geography.provincia,
             region=page.geography.regione,
+            constituency=constituency,
         )
 
         official_results: dict[tuple[str, str, int], dict[str, object]] = {}
@@ -269,6 +289,7 @@ class EligendoService:
                     round_number=audit["turno"],
                     province=page.geography.provincia,
                     region=page.geography.regione,
+                    constituency=constituency,
                 )
             }
 
@@ -386,6 +407,21 @@ class EligendoService:
             "partiti_coincidenti": party_matches,
             "partiti_non_coincidenti": party_mismatches,
             "partiti": parties,
+            "componenti": [
+                {
+                    "source_url": component.source_url,
+                    "etichetta": component.geography.comune,
+                    "collegio": component.geography.collegio,
+                    "codici": {
+                        key: value
+                        for key, value in component.geography.query_codes.items()
+                        if key.startswith(("lev", "ne"))
+                    },
+                    "aventi_diritto": component.summary.get("elettori"),
+                    "votanti": component.summary.get("votanti"),
+                }
+                for component in pages
+            ],
             "risultati_ufficiali": sorted(
                 official_results.values(),
                 key=lambda row: (

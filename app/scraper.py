@@ -47,6 +47,7 @@ def _parse_heading(soup: BeautifulSoup, source_url: str) -> tuple[ElectionInfo, 
         "area": "area",
         "regione": "regione",
         "circoscrizione": "circoscrizione",
+        "collegio": "collegio",
         "provincia": "provincia",
         "comune": "comune",
     }

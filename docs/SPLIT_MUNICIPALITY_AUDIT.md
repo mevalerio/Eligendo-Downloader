@@ -72,11 +72,22 @@ the Ministry. The API therefore provides two complementary endpoints:
 
 Both endpoints compare electors, voters, valid votes, and party-level votes.
 The multi-page endpoint requires the same chamber, election date,
-municipality, province, and region on every page. Its default relative
-tolerance is zero. Each page is retained as a source URL in the response, and
-`store=true` saves the parsed snapshot in the local database. A page with
-neither province nor region is rejected because its municipality name alone
-does not establish a safe match.
+municipality, province, region, and constituency on every page. Its default
+relative tolerance is zero. Each page is retained as a source URL in the
+response, and `store=true` saves the parsed snapshot in the local database.
+
+Page labels are canonicalised before comparison, so the pieces of a split city
+are reunited even when the website labels them inconsistently. Rome's 1994
+Chamber pages, for example, are labelled `Roma centro`, `Roma - Trieste`,
+`Parte di Comune ROMA`, and `PARTE DI COMUNE DI ROMA`; all are compared as
+`ROMA`. The response lists each piece under `componenti` with its original
+label and the website level codes (`lev2` is the college number in the
+1994-2001 Chamber, the same numbering as Legislative Decree 536/1993).
+
+Chamber pages for 1994-2001 publish the constituency but no province or region.
+The constituency then identifies the municipality, and local rows are matched
+on `constituency`. A page with no province, region, or constituency is rejected
+because its municipality name alone does not establish a safe match.
 
 Names alone do not identify a municipality. The 1958 Chamber archive has two
 municipalities called BRIONE. The [Brescia page](https://elezionistorico.interno.gov.it/index.php?tpel=C&dtel=25/05/1958&tpa=I&tpe=C&lev0=0&levsut0=0&lev1=6&levsut1=1&lev2=15&levsut2=2&levsut3=3&ne1=6&ne2=15&es0=S&es1=S&es2=S&es3=N&ms=S&ne3=150270&lev3=270)
@@ -85,8 +96,12 @@ reports 334 electors, 304 voters, and 296 valid list votes. The
 reports 164, 162, and 162 respectively. The live API comparison matched all
 10 Brescia party totals and all 11 Trento party totals exactly. Official checks
 are keyed by province and municipality (or by
-region and municipality if the page has no province), so saving one cannot
-overwrite the other. Use `provincia=BRESCIA` or `provincia=TRENTO` in the
+region, then constituency, when the page has no province), so saving one cannot
+overwrite the other. CASTRO in LOMBARDIA 2 and CASTRO in PUGLIA are stored as
+`c:lombardia_2|castro` and `c:puglia|castro`. The municipality audit accepts
+`circoscrizione` alongside `provincia` or `regione`; rows matching either are
+included, so `comune=ROMA&provincia=ROMA&circoscrizione=LAZIO 1` covers the
+1994-2001 Chamber rows, which have no province. Use `provincia=BRESCIA` or `provincia=TRENTO` in the
 municipality audit. These 1958 Chamber pages do not publish a region, so that
 field remains unknown rather than being inferred from a present-day map.
 

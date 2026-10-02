@@ -23,6 +23,51 @@ NATIONAL_ELECTION_CATEGORIES = (
 )
 
 
+def geography_municipality_key(
+    municipality: str,
+    province: str | None = None,
+    region: str | None = None,
+    constituency: str | None = None,
+) -> str:
+    """Key a municipality by the most specific geography its source publishes.
+
+    Chamber pages for 1994-2001 publish only the constituency, which still
+    separates homonyms such as CASTRO in LOMBARDIA 2 and PUGLIA.
+    """
+    base = slug(municipality)
+    if province:
+        return f"p:{slug(province)}|{base}"
+    if region:
+        return f"r:{slug(region)}|{base}"
+    if constituency:
+        return f"c:{slug(constituency)}|{base}"
+    return base
+
+
+def _geography_filter(
+    *,
+    province: str | None,
+    region: str | None,
+    constituency: str | None,
+    prefix: str = "",
+) -> tuple[str, list[str]]:
+    """Build a row filter; a constituency widens a province or region match."""
+    conditions: list[str] = []
+    parameters: list[str] = []
+    if province:
+        conditions.append(f"{prefix}province = ? COLLATE NOCASE")
+        parameters.append(province)
+    elif region:
+        conditions.append(f"{prefix}region = ? COLLATE NOCASE")
+        parameters.append(region)
+    if constituency:
+        conditions.append(f"{prefix}constituency = ? COLLATE NOCASE")
+        parameters.append(constituency)
+    if not conditions:
+        return "", []
+    return f"AND ({' OR '.join(conditions)})", parameters
+
+
 SCHEMA = """
 PRAGMA foreign_keys = ON;
 PRAGMA journal_mode = WAL;
@@ -190,6 +235,7 @@ CREATE TABLE IF NOT EXISTS official_verification_queue (
     round INTEGER NOT NULL DEFAULT -1,
     region TEXT,
     province TEXT,
+    constituency TEXT,
     municipality TEXT NOT NULL,
     municipality_key TEXT NOT NULL,
     priority INTEGER NOT NULL DEFAULT 0,
@@ -238,6 +284,16 @@ class Database:
                     "PRAGMA table_info(official_municipality_results)"
                 )
             }
+            queue_columns = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(official_verification_queue)"
+                )
+            }
+            if "constituency" not in queue_columns:
+                connection.execute(
+                    "ALTER TABLE official_verification_queue ADD COLUMN constituency TEXT"
+                )
             if "round" not in result_columns:
                 connection.execute(
                     "DROP INDEX IF EXISTS idx_official_municipality_results_lookup"
@@ -367,6 +423,12 @@ class Database:
             row["campo"]: row["ufficiale"] for row in result["riepilogo"]
         }
         verified_at = datetime.now(timezone.utc).isoformat()
+        verification_key = geography_municipality_key(
+            result["comune"],
+            result.get("provincia"),
+            result.get("regione"),
+            result.get("circoscrizione"),
+        )
         with closing(self.connect()) as connection:
             connection.execute(
                 """
@@ -392,13 +454,7 @@ class Database:
                     result["tipo_elezione"],
                     result["data"].isoformat(),
                     result["comune"],
-                    (
-                        f"p:{slug(result['provincia'])}|{slug(result['comune'])}"
-                        if result.get("provincia")
-                        else f"r:{slug(result['regione'])}|{slug(result['comune'])}"
-                        if result.get("regione")
-                        else slug(result["comune"])
-                    ),
+                    verification_key,
                     verified_at,
                     result["stato"],
                     int(bool(result["insieme_completo"])),
@@ -417,13 +473,7 @@ class Database:
                     (
                         result["tipo_elezione"],
                         result["data"].isoformat(),
-                        (
-                            f"p:{slug(result['provincia'])}|{slug(result['comune'])}"
-                            if result.get("provincia")
-                            else f"r:{slug(result['regione'])}|{slug(result['comune'])}"
-                            if result.get("regione")
-                            else slug(result["comune"])
-                        ),
+                        verification_key,
                     ),
                 ).fetchone()["id"]
             )
@@ -463,28 +513,11 @@ class Database:
                     verified_at,
                     result["tipo_elezione"],
                     result["data"].isoformat(),
-                    (
-                        f"p:{slug(result['provincia'])}|{slug(result['comune'])}"
-                        if result.get("provincia")
-                        else f"r:{slug(result['regione'])}|{slug(result['comune'])}"
-                        if result.get("regione")
-                        else slug(result["comune"])
-                    ),
+                    verification_key,
                 ),
             )
             connection.commit()
             return verification_id
-
-    @staticmethod
-    def _geography_municipality_key(
-        municipality: str, province: str | None, region: str | None
-    ) -> str:
-        base = slug(municipality)
-        if province:
-            return f"p:{slug(province)}|{base}"
-        if region:
-            return f"r:{slug(region)}|{base}"
-        return base
 
     def seed_official_verification_queue(
         self, *, category: str, election_date: date
@@ -492,13 +525,13 @@ class Database:
         """Create resumable municipality work items from imported ZIP rows."""
         with closing(self.connect()) as connection:
             rows = connection.execute(
-                """SELECT region, province, municipality, round,
+                """SELECT region, province, constituency, municipality, round,
                           MAX(COALESCE(voters, 0)) AS voters,
                           COUNT(DISTINCT college) AS college_parts
                      FROM election_results
                     WHERE category=? AND election_date=?
                       AND municipality IS NOT NULL
-                    GROUP BY region, province, municipality, round""",
+                    GROUP BY region, province, constituency, municipality, round""",
                 (category, election_date.isoformat()),
             ).fetchall()
             now = datetime.now(timezone.utc).isoformat()
@@ -507,8 +540,11 @@ class Database:
                 municipality = canonical_municipality(row["municipality"])
                 if not municipality:
                     continue
-                municipality_key = self._geography_municipality_key(
-                    municipality, row["province"], row["region"]
+                municipality_key = geography_municipality_key(
+                    municipality,
+                    row["province"],
+                    row["region"],
+                    row["constituency"],
                 )
                 priority = min(int(row["voters"] or 0) // 10_000, 100)
                 if municipality != row["municipality"] or row["college_parts"] > 1:
@@ -521,24 +557,27 @@ class Database:
                     round_number,
                     row["region"],
                     row["province"],
+                    row["constituency"],
                     municipality,
                     municipality_key,
                     priority,
                     now,
                 )
                 previous = work.get(key)
-                if previous is None or candidate[7] > previous[7]:
+                if previous is None or candidate[8] > previous[8]:
                     work[key] = candidate
             before = connection.total_changes
             connection.executemany(
                 """INSERT INTO official_verification_queue(
                        category, election_date, round, region, province,
-                       municipality, municipality_key, priority, updated_at
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       constituency, municipality, municipality_key, priority,
+                       updated_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(category, election_date, round, municipality_key)
                    DO UPDATE SET
                        region=COALESCE(excluded.region, region),
                        province=COALESCE(excluded.province, province),
+                       constituency=COALESCE(excluded.constituency, constituency),
                        municipality=excluded.municipality,
                        priority=MAX(priority, excluded.priority),
                        updated_at=excluded.updated_at""",
@@ -656,6 +695,7 @@ class Database:
                 "turno": None if row["round"] == -1 else row["round"],
                 "regione": row["region"],
                 "provincia": row["province"],
+                "circoscrizione": row["constituency"],
                 "comune": row["municipality"],
                 "priorita": row["priority"],
                 "stato": row["status"],
@@ -744,14 +784,14 @@ class Database:
         categories: tuple[str, ...],
         province: str | None = None,
         region: str | None = None,
+        constituency: str | None = None,
     ) -> dict[tuple[str, str], dict[str, Any]]:
         placeholders = ",".join("?" for _ in categories)
         legacy_key = slug(municipality)
-        geography_key = (
-            f"p:{slug(province)}|{legacy_key}"
-            if province
-            else f"r:{slug(region)}|{legacy_key}"
-            if region
+        geography_key = geography_municipality_key(municipality, province, region)
+        constituency_key = (
+            geography_municipality_key(municipality, constituency=constituency)
+            if constituency
             else legacy_key
         )
         with closing(self.connect()) as connection:
@@ -759,15 +799,15 @@ class Database:
                 f"""
                 SELECT *
                 FROM official_municipality_verifications
-                WHERE municipality_key IN (?, ?)
+                WHERE municipality_key IN (?, ?, ?)
                   AND category IN ({placeholders})
                 ORDER BY verified_at DESC
                 """,
-                (geography_key, legacy_key, *categories),
+                (geography_key, constituency_key, legacy_key, *categories),
             ).fetchall()
         verifications: dict[tuple[str, str], dict[str, Any]] = {}
         for row in rows:
-            if row["municipality_key"] == legacy_key and geography_key != legacy_key:
+            if row["municipality_key"] == legacy_key and (province or region):
                 payload = json.loads(row["payload_json"])
                 source_geography = (
                     payload.get("provincia") if province else payload.get("regione")
@@ -1476,6 +1516,7 @@ class Database:
         voter_tolerance: float = 0.35,
         province: str | None = None,
         region: str | None = None,
+        constituency: str | None = None,
     ) -> list[dict[str, Any]]:
         if not 0 <= voter_tolerance < 1:
             raise ValueError(
@@ -1499,14 +1540,12 @@ class Database:
                 "parte_del_comune_di_reggio_di_calabria",
             )
         legacy_placeholders = ",".join("?" for _ in legacy_keys)
-        geography_clause = ""
-        geography_parameters: list[str] = []
-        if province:
-            geography_clause = "AND e.province = ? COLLATE NOCASE"
-            geography_parameters.append(province)
-        elif region:
-            geography_clause = "AND e.region = ? COLLATE NOCASE"
-            geography_parameters.append(region)
+        geography_clause, geography_parameters = _geography_filter(
+            province=province,
+            region=region,
+            constituency=constituency,
+            prefix="e.",
+        )
         with closing(self.connect()) as connection:
             units = connection.execute(
                 f"""
@@ -1613,6 +1652,7 @@ class Database:
             categories=reference_categories,
             province=province,
             region=region,
+            constituency=constituency,
         )
         for row in selected:
             verification = official.get(
@@ -1857,6 +1897,7 @@ class Database:
         election_date: date,
         province: str | None = None,
         region: str | None = None,
+        constituency: str | None = None,
     ) -> dict[str, Any] | None:
         """Return one local election layer without rebuilding adjacent history."""
         municipality_key = slug(municipality)
@@ -1872,14 +1913,12 @@ class Database:
                 "parte_del_comune_di_reggio_di_calabria",
             )
         legacy_placeholders = ",".join("?" for _ in legacy_keys)
-        geography_clause = ""
-        geography_parameters: list[str] = []
-        if province:
-            geography_clause = "AND e.province = ? COLLATE NOCASE"
-            geography_parameters.append(province)
-        elif region:
-            geography_clause = "AND e.region = ? COLLATE NOCASE"
-            geography_parameters.append(region)
+        geography_clause, geography_parameters = _geography_filter(
+            province=province,
+            region=region,
+            constituency=constituency,
+            prefix="e.",
+        )
         with closing(self.connect()) as connection:
             units = connection.execute(
                 f"""SELECT e.catalogue_id, e.source_file, e.result_type,
@@ -1983,6 +2022,7 @@ class Database:
         round_number: int | None = None,
         province: str | None = None,
         region: str | None = None,
+        constituency: str | None = None,
     ) -> list[dict[str, Any]]:
         """Aggregate one selected result layer across municipality fragments."""
         municipality_key = slug(municipality)
@@ -1998,14 +2038,12 @@ class Database:
                 "parte_del_comune_di_reggio_di_calabria",
             )
         legacy_placeholders = ",".join("?" for _ in legacy_keys)
-        geography_clause = ""
-        geography_parameters: list[str] = []
-        if province:
-            geography_clause = "AND province = ? COLLATE NOCASE"
-            geography_parameters.append(province)
-        elif region:
-            geography_clause = "AND region = ? COLLATE NOCASE"
-            geography_parameters.append(region)
+        geography_clause, geography_parameters = _geography_filter(
+            province=province,
+            region=region,
+            constituency=constituency,
+            prefix="",
+        )
         round_clause = ""
         round_parameters: list[int] = []
         if round_number is not None:

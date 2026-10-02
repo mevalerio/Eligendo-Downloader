@@ -16,6 +16,7 @@ class Geography(BaseModel):
     area: str | None = None
     regione: str | None = None
     circoscrizione: str | None = None
+    collegio: str | None = None
     provincia: str | None = None
     comune: str | None = None
     query_codes: dict[str, str] = Field(default_factory=dict)
@@ -111,6 +112,7 @@ class OfficialMunicipalityVerificationResponse(BaseModel):
     partiti_coincidenti: int
     partiti_non_coincidenti: int
     partiti: list[OfficialPartyComparison]
+    componenti: list[dict[str, Any]] = Field(default_factory=list)
     risultati_ufficiali: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -126,6 +128,7 @@ class OfficialVerificationQueueRow(BaseModel):
     turno: int | None = None
     regione: str | None = None
     provincia: str | None = None
+    circoscrizione: str | None = None
     comune: str
     priorita: int
     stato: Literal["pending", "partial", "verified", "failed"]
@@ -474,6 +477,7 @@ class MunicipalityAuditResponse(BaseModel):
     comune: str
     provincia: str | None = None
     regione: str | None = None
+    circoscrizione: str | None = None
     categories: list[str]
     voter_tolerance: float
     elections_checked: int

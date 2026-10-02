@@ -12,12 +12,12 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from bs4 import BeautifulSoup
 
 from .config import Settings
-from .database import Database
+from .database import Database, geography_municipality_key
 from .http_client import Download, SafeHttpClient, UpstreamError
 from .schemas import PageResult
 from .scraper import parse_page_html
 from .service import EligendoService
-from .utils import canonical_municipality, slug
+from .utils import canonical_municipality
 
 
 CATEGORY_CODES = {
@@ -179,7 +179,7 @@ def crawl_and_reconcile(
     service = EligendoService(settings, database)
     frontier = deque([root_url(category, election_date)])
     seen: set[str] = set()
-    municipality_pages: dict[tuple[str, str, str], list[PageResult]] = defaultdict(list)
+    municipality_pages: dict[tuple[str, str], list[PageResult]] = defaultdict(list)
     network_requests = 0
     errors = 0
     complete = True
@@ -257,8 +257,12 @@ def crawl_and_reconcile(
                 municipality = canonical_municipality(page.geography.comune)
                 if municipality:
                     key = (
-                        slug(page.geography.provincia or page.geography.regione or ""),
-                        slug(municipality),
+                        geography_municipality_key(
+                            municipality,
+                            page.geography.provincia,
+                            page.geography.regione,
+                            page.geography.circoscrizione,
+                        ),
                         str(page.election.date),
                     )
                     municipality_pages[key].append(page)

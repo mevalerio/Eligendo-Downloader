@@ -11,6 +11,7 @@ from app.database import Database
 from app.history import normalise_history_results
 from app.schemas import CatalogueEntry, ElectionInfo, Geography, PageResult, ResultRecord
 from app.service import EligendoService
+from app.utils import slug
 
 
 def source_row(
@@ -21,15 +22,16 @@ def source_row(
     region: str | None = "LAZIO",
     province: str | None = "ROMA",
     municipality: str | None = "ROMA",
+    circoscrizione: str | None = None,
 ) -> ArchiveRow:
     return ArchiveRow(
         file_name=file_name,
         row_number=row_number,
         region=region,
-        circoscrizione=None,
+        circoscrizione=circoscrizione,
         province=province,
         municipality=municipality,
-        municipality_key=municipality.casefold() if municipality else None,
+        municipality_key=slug(municipality) if municipality else None,
         payload=payload,
     )
 
@@ -1152,6 +1154,245 @@ def test_official_pages_keep_homonymous_municipalities_separate(
     pages[first_url] = pages[first_url].model_copy(
         update={"geography": Geography(comune="BRIONE")}
     )
-    with pytest.raises(ValueError, match="province or region"):
+    with pytest.raises(ValueError, match="province, region, or constituency"):
         service.verify_official_municipality_page(first_url, store=False)
+    service.close()
+
+
+def _settings(tmp_path, name: str) -> Settings:
+    return Settings(
+        data_dir=Path(tmp_path),
+        database_path=tmp_path / name,
+        request_interval_seconds=0,
+        request_timeout_seconds=1,
+        catalogue_ttl_seconds=60,
+        max_archive_bytes=1024,
+        max_uncompressed_bytes=1024,
+    )
+
+
+def _mattarellum_page(
+    url: str,
+    *,
+    constituency: str,
+    label: str,
+    college: str,
+    electors: int,
+    voters: int,
+    parties: tuple[tuple[str, int], ...],
+) -> PageResult:
+    """A 1994 Chamber page: constituency and municipality, no province or region."""
+    return PageResult(
+        source_url=url,
+        retrieved_at=datetime.now(timezone.utc),
+        election=ElectionInfo(code="C", name="Camera", date=date(1994, 3, 27)),
+        geography=Geography(
+            area="ITALIA",
+            circoscrizione=constituency,
+            comune=label,
+            query_codes={"tpel": "C", "lev1": "15", "lev2": college},
+        ),
+        summary={"elettori": electors, "votanti": voters},
+        records=[
+            ResultRecord(record_type="list", name=party, votes=votes)
+            for party, votes in parties
+        ]
+        + [
+            ResultRecord(
+                record_type="total",
+                name="TOTALI",
+                votes=sum(votes for _, votes in parties),
+            )
+        ],
+    )
+
+
+def test_constituency_only_pages_reunite_split_rome(tmp_path, monkeypatch) -> None:
+    """Rome 1994: pieces labelled differently on each page sum to one municipality."""
+    database = Database(tmp_path / "rome-1994.sqlite3")
+    pieces = (
+        # Open Data label, website label, college, electors, voters, FI, PDS
+        ("ROMA", "Roma centro", "1", 1000, 800, 300, 400),
+        ("ROMA", "Roma - Trieste", "2", 900, 700, 350, 250),
+        ("PARTE DI COMUNE DI ROMA", "Parte di Comune ROMA", "12", 700, 600, 200, 300),
+    )
+    rows = []
+    for index, (od_label, _, college, electors, voters, fi, pds) in enumerate(pieces):
+        for offset, (party, votes) in enumerate((("FORZA ITALIA", fi), ("PDS", pds))):
+            rows.append(
+                source_row(
+                    {
+                        "collegio": f"Roma - collegio {college}",
+                        "lista": party,
+                        "voti_lista": str(votes),
+                        "elettori": str(electors),
+                        "votanti": str(voters),
+                    },
+                    row_number=2 + index * 2 + offset,
+                    region=None,
+                    province=None,
+                    municipality=od_label,
+                    circoscrizione="LAZIO 1",
+                )
+            )
+    # Ciampino shares college 12 with a piece of Rome and must stay separate.
+    rows.append(
+        source_row(
+            {
+                "collegio": "Roma - collegio 12",
+                "lista": "FORZA ITALIA",
+                "voti_lista": "90",
+                "elettori": "300",
+                "votanti": "250",
+            },
+            row_number=50,
+            region=None,
+            province=None,
+            municipality="CIAMPINO",
+            circoscrizione="LAZIO 1",
+        )
+    )
+    database.replace_archive(
+        entry("camera", date(1994, 3, 27), "camera-19940327.zip"),
+        sha256="rome-1994",
+        rows=rows,
+    )
+    service = EligendoService(_settings(tmp_path, "rome-1994.sqlite3"), database)
+    base = "https://elezionistorico.interno.gov.it/index.php?tpel=C&lev2="
+    pages = {
+        f"{base}{college}": _mattarellum_page(
+            f"{base}{college}",
+            constituency="LAZIO 1",
+            label=label,
+            college=college,
+            electors=electors,
+            voters=voters,
+            parties=(("FORZA ITALIA", fi), ("PDS", pds)),
+        )
+        for _, label, college, electors, voters, fi, pds in pieces
+    }
+    monkeypatch.setattr(service, "fetch_page", lambda url, store: pages[url])
+
+    result = service.verify_official_municipality_pages(
+        list(pages), store=True, complete_set=True
+    )
+
+    assert result["stato"] == "exact_match"
+    assert result["comune"] == "ROMA"
+    assert result["circoscrizione"] == "LAZIO 1"
+    assert result["pagine_ufficiali"] == 3
+    assert [row["ufficiale"] for row in result["riepilogo"]] == [2600, 2100, 1800]
+    assert [row["ricostruito"] for row in result["riepilogo"]] == [2600, 2100, 1800]
+    assert [component["etichetta"] for component in result["componenti"]] == [
+        "Roma centro",
+        "Roma - Trieste",
+        "Parte di Comune ROMA",
+    ]
+    assert [component["codici"]["lev2"] for component in result["componenti"]] == [
+        "1",
+        "2",
+        "12",
+    ]
+    with database.connect() as connection:
+        keys = [
+            row[0]
+            for row in connection.execute(
+                "SELECT municipality_key FROM official_municipality_verifications"
+            )
+        ]
+    assert keys == ["c:lazio_1|roma"]
+
+    audit = database.municipality_election_audit(
+        municipality="ROMA",
+        categories=("camera",),
+        province="ROMA",
+        constituency="LAZIO 1",
+    )[0]
+    assert audit["fonte_aggregazione"] == "official_municipality_pages"
+    assert audit["verifica_ufficiale_pagine"] == 3
+    service.close()
+
+
+def test_constituency_keeps_homonymous_municipalities_separate(
+    tmp_path, monkeypatch
+) -> None:
+    database = Database(tmp_path / "castro.sqlite3")
+    cases = (
+        ("LOMBARDIA 2", 1100, 950, (("LEGA NORD", 400), ("PDS", 300))),
+        ("PUGLIA", 2200, 1900, (("FORZA ITALIA", 900), ("PDS", 800))),
+    )
+    rows = [
+        source_row(
+            {
+                "lista": party,
+                "voti_lista": str(votes),
+                "elettori": str(electors),
+                "votanti": str(voters),
+            },
+            row_number=2 + case_index * 2 + party_index,
+            region=None,
+            province=None,
+            municipality="CASTRO",
+            circoscrizione=constituency,
+        )
+        for case_index, (constituency, electors, voters, parties) in enumerate(cases)
+        for party_index, (party, votes) in enumerate(parties)
+    ]
+    database.replace_archive(
+        entry("camera", date(1994, 3, 27), "camera-19940327.zip"),
+        sha256="castro",
+        rows=rows,
+    )
+    database.seed_official_verification_queue(
+        category="camera", election_date=date(1994, 3, 27)
+    )
+    count, queued = database.official_verification_queue(
+        category="camera",
+        election_date=date(1994, 3, 27),
+        status="pending",
+        limit=10,
+        offset=0,
+    )
+    assert count == 2
+    assert {row["circoscrizione"] for row in queued} == {"LOMBARDIA 2", "PUGLIA"}
+
+    service = EligendoService(_settings(tmp_path, "castro.sqlite3"), database)
+    base = "https://elezionistorico.interno.gov.it/index.php?tpel=C&c="
+    pages = {
+        f"{base}{index}": _mattarellum_page(
+            f"{base}{index}",
+            constituency=constituency,
+            label="CASTRO",
+            college="1",
+            electors=electors,
+            voters=voters,
+            parties=parties,
+        )
+        for index, (constituency, electors, voters, parties) in enumerate(cases)
+    }
+    monkeypatch.setattr(service, "fetch_page", lambda url, store: pages[url])
+    for url in pages:
+        result = service.verify_official_municipality_page(
+            url, store=True, complete_set=True
+        )
+        assert result["stato"] == "exact_match"
+
+    with database.connect() as connection:
+        keys = {
+            row[0]
+            for row in connection.execute(
+                "SELECT municipality_key FROM official_municipality_verifications"
+            )
+        }
+    assert keys == {"c:lombardia_2|castro", "c:puglia|castro"}
+    count, _ = database.official_verification_queue(
+        category="camera",
+        election_date=date(1994, 3, 27),
+        status="verified",
+        limit=10,
+        offset=0,
+    )
+    assert count == 2
+    with pytest.raises(ValueError, match="same constituency"):
+        service.verify_official_municipality_pages(list(pages), store=False)
     service.close()
