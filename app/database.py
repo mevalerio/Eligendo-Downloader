@@ -1623,6 +1623,7 @@ class Database:
         if municipality_key == "reggio_calabria":
             legacy_keys = (
                 *legacy_keys,
+                "reggio_di_calabria",
                 "parte_di_comune_reggio_di_calabria",
                 "parte_del_comune_di_reggio_di_calabria",
             )
@@ -1996,6 +1997,7 @@ class Database:
         if municipality_key == "reggio_calabria":
             legacy_keys = (
                 *legacy_keys,
+                "reggio_di_calabria",
                 "parte_di_comune_reggio_di_calabria",
                 "parte_del_comune_di_reggio_di_calabria",
             )
@@ -2121,6 +2123,7 @@ class Database:
         if municipality_key == "reggio_calabria":
             legacy_keys = (
                 *legacy_keys,
+                "reggio_di_calabria",
                 "parte_di_comune_reggio_di_calabria",
                 "parte_del_comune_di_reggio_di_calabria",
             )

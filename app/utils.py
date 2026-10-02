@@ -44,7 +44,12 @@ HISTORICALLY_SPLIT_MUNICIPALITIES = (
     "VENEZIA",
     "BARI",
     "ROMA",
+    "VERONA",
 )
+# Official alternative names; Open Data uses both for Reggio Calabria (1994-1996).
+MUNICIPALITY_ALIASES = {
+    "reggio di calabria": "REGGIO CALABRIA",
+}
 
 
 def canonical_municipality(value: str | None) -> str | None:
@@ -52,6 +57,8 @@ def canonical_municipality(value: str | None) -> str | None:
     if not cleaned:
         return None
     folded = cleaned.casefold()
+    if folded in MUNICIPALITY_ALIASES:
+        return MUNICIPALITY_ALIASES[folded]
     explicit_part = re.fullmatch(
         r"parte\s+(?:di|del)\s+comune(?:\s+di)?\s+(.+)",
         folded,
