@@ -38,6 +38,24 @@ def registry_rows(map_version: str) -> tuple[dict[str, str], ...]:
         return tuple(csv.DictReader(handle))
 
 
+def _registry_index(map_version: str) -> dict[tuple[str, str], set[int]]:
+    """(geography key, municipality key) -> colleges, built once per loaded table."""
+    rows = registry_rows(map_version)
+    cached = _INDEX.get(map_version)
+    if cached is not None and cached[0] is rows:
+        return cached[1]
+    index: dict[tuple[str, str], set[int]] = {}
+    for row in rows:
+        if row["municipality"]:
+            key = (slug(row["geography"]), slug(row["municipality"]))
+            index.setdefault(key, set()).add(int(row["college"]))
+    _INDEX[map_version] = (rows, index)
+    return index
+
+
+_INDEX: dict[str, tuple[tuple[dict[str, str], ...], dict[tuple[str, str], set[int]]]] = {}
+
+
 def legal_colleges(
     *,
     category: str,
@@ -54,17 +72,17 @@ def legal_colleges(
     version = district_map_for(category, year)
     if version is None:
         return None
-    rows = registry_rows(version.id)
-    if not rows:
+    if not registry_rows(version.id):
         return None
     municipality_key = slug(municipality)
     geography_key = slug(geography or "")
     colleges = sorted(
         {
-            int(row["college"])
-            for row in rows
-            if slug(row["municipality"]) == municipality_key
-            and (not geography_key or slug(row["geography"]) == geography_key)
+            college
+            for (row_geography, row_municipality), numbers in _registry_index(version.id).items()
+            if row_municipality == municipality_key
+            and (not geography_key or row_geography == geography_key)
+            for college in numbers
         }
     )
     return {
