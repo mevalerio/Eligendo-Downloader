@@ -82,7 +82,8 @@ every college and the municipalities, city zones, or described parts of a city
 that compose it. It is the legal reference for how many college pieces a
 municipality should have. Tables exist for
 `camera-mattarellum-1993-corrected` (475 colleges, 8,650 entries) and
-`senato-mattarellum-1993-corrected` (232 colleges, 8,480 entries).
+`senato-mattarellum-1993-corrected` (232 colleges, 8,480 entries). Unresolved
+entries (44 and 80) keep their OCR text for review.
 
 | Column | Definition |
 |---|---|
@@ -115,9 +116,8 @@ municipality for 8,191 pages):
   college set, including Rome (1-24), Naples (1-9), Milan (1-11) and Turin
   (1-8); the exceptions are an OCR tie for TAINO and Palermo, below;
 - about 1% of municipality-college pairs still differ, mostly short names the
-  OCR garbled. For the Senate, 153 of 232 colleges match Open Data membership
-  exactly and 65 more differ by at most two unresolved names; no municipality
-  is assigned to a wrong college there.
+  OCR garbled. For the Senate, 160 of 232 colleges match Open Data membership
+  exactly and 61 more differ by at most two unresolved names.
 
 The printed supplement contains defects that the extractor handles explicitly:
 

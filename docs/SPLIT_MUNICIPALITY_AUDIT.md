@@ -149,14 +149,17 @@ contradict them, and the page set was declared complete.
 
 The registry exposed these source problems in the 1994 Chamber election:
 
-- Palermo has six colleges (9-14). The website crawl holds no Palermo page for
-  college 9 ("Palermo - Capaci"); its college page lists only Capaci, Isola
-  delle Femmine, Torretta and Ustica.
-- Open Data gives that Palermo piece 566,075 electors but 62,113 voters; the
-  figure is the whole city's electorate (1996: 82,445). Palermo 1994 electors
-  are therefore inflated by about 480,000.
-- Open Data gives the Reggio di Calabria piece of college 16 147,494 electors;
-  the website reports 49,247 (1996: 50,826).
+- Palermo has six colleges (9-14), and Open Data has six pieces in 1996 and
+  2001. In 1994 the piece in college 9 ("Palermo - Capaci") is missing both
+  from the website crawl and from the proportional file
+  (`camera-19940327_Proporzionale.txt`), so Palermo's party-vote layer covers
+  five pieces and 485,548 electors. Only the candidate file has the piece, with
+  566,075 electors (the whole city's electorate) against 62,113 voters; the
+  1996 piece has 82,445 electors. The legal piece count reports `mismatch`.
+- Reggio Calabria 1994: the website gives the two pieces 98,247 and 49,247
+  electors (147,494 in all); Open Data gives the second piece 147,494, so the
+  reconstruction (245,741) does not match the website and is reported as
+  `mismatch` (1996: 149,161 for both pieces).
 - Rome's 1996 Senate/Camera elector ratio of 0.942 reported earlier omitted the
   Ciampino and Fiumicino pieces, labelled `parte del comune di Roma` in 1996.
   With all 24 pieces Rome has 2,307,090 Camera electors and a ratio of 0.885,

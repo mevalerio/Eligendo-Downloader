@@ -3741,28 +3741,28 @@ senato-mattarellum-1993-corrected,VENETO,15,TREGNAGO,whole,,72,TREGNAGO,1.0
 senato-mattarellum-1993-corrected,VENETO,15,VALEGGIO SUL MINCIO,whole,,73,VALEGGIO SUL MINCIU,0.941
 senato-mattarellum-1993-corrected,VENETO,15,VELO VERONESE,whole,,73,VELO VERONESE,1.0
 senato-mattarellum-1993-corrected,VENETO,15,VESTENANOVA,whole,,73,VESTENANOVA,1.0
-senato-mattarellum-1993-corrected,VENETO,16,,whole,,73,{ VERONA-ZONA AMM.1 3),0.429
-senato-mattarellum-1993-corrected,VENETO,16,,whole,,73,{ VERONA-ZONA AMM.2 ),0.462
+senato-mattarellum-1993-corrected,VENETO,16,VERONA,zone,ZONA AMM.1,73,{ VERONA-ZONA AMM.1 3),1.0
+senato-mattarellum-1993-corrected,VENETO,16,VERONA,zone,ZONA AMM.2,73,{ VERONA-ZONA AMM.2 ),1.0
 senato-mattarellum-1993-corrected,VENETO,16,,whole,,73,{ VERUNA-ZONA ANM.3 ),0.462
-senato-mattarellum-1993-corrected,VENETO,16,,whole,,73,€ VERONA-ZONA AMM.4 ),0.462
-senato-mattarellum-1993-corrected,VENETO,16,,whole,,73,{ VERONA-ZONA AMM.10 }),0.4
-senato-mattarellum-1993-corrected,VENETO,16,,whole,,73,{ VERONA-ZONA AMBM.11 2,0.375
-senato-mattarellum-1993-corrected,VENETO,16,,whole,,73,{ VERONA-ZONA AMM.18 ),0.4
-senato-mattarellum-1993-corrected,VENETO,16,,whole,,73,{( VERONA-ZONA AMM.30 },0.429
-senato-mattarellum-1993-corrected,VENETO,16,,whole,,73,{ VERONA-ZONA AMM.38 ),0.429
-senato-mattarellum-1993-corrected,VENETO,16,,whole,,73,C( VERONA-ZONA AMN.39 ),0.429
-senato-mattarellum-1993-corrected,VENETO,16,,whole,,73,( VERONA-ZONA AMH.16 3,0.429
+senato-mattarellum-1993-corrected,VENETO,16,VERONA,zone,ZONA AMM.4,73,€ VERONA-ZONA AMM.4 ),1.0
+senato-mattarellum-1993-corrected,VENETO,16,VERONA,zone,ZONA AMM.10,73,{ VERONA-ZONA AMM.10 }),1.0
+senato-mattarellum-1993-corrected,VENETO,16,VERONA,zone,ZONA AMBM.11,73,{ VERONA-ZONA AMBM.11 2,1.0
+senato-mattarellum-1993-corrected,VENETO,16,VERONA,zone,ZONA AMM.18,73,{ VERONA-ZONA AMM.18 ),1.0
+senato-mattarellum-1993-corrected,VENETO,16,VERONA,zone,ZONA AMM.30,73,{( VERONA-ZONA AMM.30 },1.0
+senato-mattarellum-1993-corrected,VENETO,16,VERONA,zone,ZONA AMM.38,73,{ VERONA-ZONA AMM.38 ),1.0
+senato-mattarellum-1993-corrected,VENETO,16,VERONA,zone,ZONA AMN.39,73,C( VERONA-ZONA AMN.39 ),1.0
+senato-mattarellum-1993-corrected,VENETO,16,VERONA,zone,ZONA AMH.16,73,( VERONA-ZONA AMH.16 3,1.0
 senato-mattarellum-1993-corrected,VENETO,16,,whole,,73,( YVERONA-ZONA AMM.37 },0.429
 senato-mattarellum-1993-corrected,VENETO,16,VENEZIA,zone,VERONA -ZONA AMM. 15,73,( VERONA -ZONA AMM.}15 },1.0
-senato-mattarellum-1993-corrected,VENETO,16,,whole,,73,({ VERONA-ZONA AMNMN.17 ),0.375
+senato-mattarellum-1993-corrected,VENETO,16,VERONA,zone,ZONA AMNMN.17,73,({ VERONA-ZONA AMNMN.17 ),1.0
 senato-mattarellum-1993-corrected,VENETO,16,,whole,,73,{ YERONA-ZONA AMM.14G ),0.333
-senato-mattarellum-1993-corrected,VENETO,16,,whole,,73,{ VERONA-ZONA AMM.36 ),0.462
-senato-mattarellum-1993-corrected,VENETO,16,,whole,,73,{ VERONA-ZONA AMM.12 ),0.429
-senato-mattarellum-1993-corrected,VENETO,16,,whole,,73,( VERONA-ZONA AMHM.13 >,0.4
+senato-mattarellum-1993-corrected,VENETO,16,VERONA,zone,ZONA AMM.36,73,{ VERONA-ZONA AMM.36 ),1.0
+senato-mattarellum-1993-corrected,VENETO,16,VERONA,zone,ZONA AMM.12,73,{ VERONA-ZONA AMM.12 ),1.0
+senato-mattarellum-1993-corrected,VENETO,16,VERONA,zone,ZONA AMHM.13,73,( VERONA-ZONA AMHM.13 >,1.0
 senato-mattarellum-1993-corrected,VENETO,16,,whole,,73,{ YERONA-ZONA AMM.35 ),0.357
-senato-mattarellum-1993-corrected,VENETO,16,,whole,,73,{ VERONA-ZONA AMM.31 },0.429
+senato-mattarellum-1993-corrected,VENETO,16,VERONA,zone,ZONA AMM.31,73,{ VERONA-ZONA AMM.31 },1.0
 senato-mattarellum-1993-corrected,VENETO,16,,whole,,73,"{ YERONA-ZONA AMM.,32 )",0.385
-senato-mattarellum-1993-corrected,VENETO,16,,whole,,73,{ VERONA-ZONA AMM.33 ),0.462
+senato-mattarellum-1993-corrected,VENETO,16,VERONA,zone,ZONA AMM.33,73,{ VERONA-ZONA AMM.33 ),1.0
 senato-mattarellum-1993-corrected,VENETO,16,,whole,,73,"{( YERONA-ZONA AMM.,34 )",0.385
 senato-mattarellum-1993-corrected,VENETO,17,ALBAREDO D'ADIGE,whole,,73,ALBAREDO D'ADIGE,1.0
 senato-mattarellum-1993-corrected,VENETO,17,ANGIARI,whole,,73,ANGIARI,1.0
@@ -4498,13 +4498,13 @@ senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,8,SAN PIETRO IN CASALE,whole,,8
 senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,8,SANT'AGATA BOLOGNESE,whole,,86,SANT'AGATA BOLOGNESE,1.0
 senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,9,CAMPOGALLIANO,whole,,86,CAMPOGALLIANO,1.0
 senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,9,CARPI,whole,,86,CARPI,1.0
-senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,9,,whole,,86,{ MODENA-CIRC.1 ),0.545
-senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,9,,whole,,86,{ MODENA-CIRC.2 },0.6
-senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,9,,whole,,86,{ MODENA-CIRC.3 ),0.6
-senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,9,,whole,,86,{ MODENA-CIRC.4 ),0.6
-senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,9,,whole,,86,( MODENA-CIRC.5 ),0.545
+senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,9,MODENA,zone,CIRC.1,86,{ MODENA-CIRC.1 ),1.0
+senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,9,MODENA,zone,CIRC.2,86,{ MODENA-CIRC.2 },1.0
+senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,9,MODENA,zone,CIRC.3,86,{ MODENA-CIRC.3 ),1.0
+senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,9,MODENA,zone,CIRC.4,86,{ MODENA-CIRC.4 ),1.0
+senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,9,MODENA,zone,CIRC.5,86,( MODENA-CIRC.5 ),1.0
 senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,9,,whole,,86,{ MOUDENA-CIRC.6 ),0.545
-senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,9,,whole,,86,( MODENA-CIRC.7 ),0.6
+senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,9,MODENA,zone,CIRC.7,86,( MODENA-CIRC.7 ),1.0
 senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,9,SOLIERA,whole,,86,SOLIERA,1.0
 senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,10,CASTELFRANCO EMILIA,whole,,86,CASTELFRANCO EMILIA,1.0
 senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,10,CASTELNUOVO RANGONE,whole,,86,CASTELNUOVO RANGONE,1.0
@@ -4617,13 +4617,13 @@ senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,13,MONCHIO DELLE CORTI,whole,,8
 senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,13,MONTECHIARUGOLO,whole,,88,HONTECHIARUGOLO,1.0
 senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,13,NEVIANO DEGLI ARDUINI,whole,,88,NEVIANO DEGLI ARDUINI,1.0
 senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,13,PALANZANO,whole,,88,PALANZANO,1.0
-senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,13,,whole,,88,C( PARMA-CIRC.1 ),0.455
-senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,13,,whole,,88,( PARMA-CIRC.2 }),0.556
-senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,13,,whole,,88,{ PARMA-CIRC.3 }),0.556
-senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,13,,whole,,88,{€ PARMA-CIRC.4 ),0.556
-senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,13,,whole,,88,€ PARMA-CIRC.5 ),0.5
-senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,13,,whole,,88,{ PARMA-CIRC.é ì,0.556
-senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,13,,whole,,88,{ PARMA-CIRC.7 3,0.556
+senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,13,PARMA,zone,CIRC.1,88,C( PARMA-CIRC.1 ),1.0
+senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,13,PARMA,zone,CIRC.2,88,( PARMA-CIRC.2 }),1.0
+senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,13,PARMA,zone,CIRC.3,88,{ PARMA-CIRC.3 }),1.0
+senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,13,PARMA,zone,CIRC.4,88,{€ PARMA-CIRC.4 ),1.0
+senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,13,PARMA,zone,CIRC.5,88,€ PARMA-CIRC.5 ),1.0
+senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,13,PARMA,zone,CIRC.é,88,{ PARMA-CIRC.é ì,1.0
+senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,13,PARMA,zone,CIRC.7,88,{ PARMA-CIRC.7 3,1.0
 senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,13,SALA BAGANZA,whole,,88,SALA BAGANZA,1.0
 senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,13,SOLIGNANO,whole,,88,SOL IGNANO,1.0
 senato-mattarellum-1993-corrected,EMILIA-ROMAGNA,13,TERENZO,whole,,88,TERENZO,1.0

@@ -438,9 +438,16 @@ def build(chamber: str, tsv: Path, reference: dict[str, dict[str, set[str]]]) ->
                 kind, municipality, score = entry["kind"], None, 0.0
                 if kind == "zone":
                     city = None
+                    zone_cities = list(split_cities)
                     if entry.get("prefix"):
                         city, prefix_score = match_name(entry["prefix"], split_names)
                         city = city if prefix_score >= 0.95 else None
+                        # Zones of a city that Open Data shows in one piece
+                        # (Senate 1994: "VERONA-ZONA AMM.1"); exact names only.
+                        exact = names.get(normal(entry["prefix"]))
+                        if city is None and exact:
+                            city = exact
+                            zone_cities.append(exact)
                     if city is None and entry.get("code"):
                         code = entry["code"].translate(str.maketrans({"8": "B", "0": "O", "1": "I", "5": "S"}))
                         city = CITY_CODES.get(code)
@@ -453,7 +460,7 @@ def build(chamber: str, tsv: Path, reference: dict[str, dict[str, set[str]]]) ->
                         if city not in split_cities:
                             coded_cities = [name for name in split_cities if name in CITY_CODES.values()]
                             city = coded_cities[0] if len(coded_cities) == 1 else None
-                    if city in split_cities:
+                    if city in zone_cities:
                         college_city, municipality, score = city, city, 1.0
                     else:
                         kind = "whole"
