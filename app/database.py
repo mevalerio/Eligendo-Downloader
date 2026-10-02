@@ -250,6 +250,30 @@ CREATE TABLE IF NOT EXISTS official_verification_queue (
 CREATE INDEX IF NOT EXISTS idx_official_verification_queue_status
 ON official_verification_queue(status, priority DESC, election_date, category);
 
+CREATE TABLE IF NOT EXISTS official_parent_closures (
+    id INTEGER PRIMARY KEY,
+    category TEXT NOT NULL,
+    election_date TEXT NOT NULL,
+    parent_url TEXT NOT NULL,
+    parent_label TEXT,
+    constituency TEXT,
+    level_codes_json TEXT NOT NULL,
+    child_pages INTEGER NOT NULL,
+    child_urls_json TEXT NOT NULL,
+    parent_electors INTEGER,
+    child_electors INTEGER,
+    parent_voters INTEGER,
+    child_voters INTEGER,
+    parent_valid_votes INTEGER,
+    child_valid_votes INTEGER,
+    subjects_compared INTEGER NOT NULL,
+    subjects_mismatched INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    checked_at TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    UNIQUE(category, election_date, parent_url)
+);
+
 CREATE TABLE IF NOT EXISTS official_reconciliation_runs (
     category TEXT NOT NULL,
     election_date TEXT NOT NULL,
@@ -706,6 +730,69 @@ class Database:
             }
             for row in rows
         ]
+
+    def store_parent_closures(
+        self,
+        *,
+        category: str,
+        election_date: date,
+        closures: list[dict[str, Any]],
+    ) -> int:
+        """Replace one election's parent-page closure checks."""
+        checked_at = datetime.now(timezone.utc).isoformat()
+        with closing(self.connect()) as connection:
+            connection.execute(
+                "DELETE FROM official_parent_closures WHERE category=? AND election_date=?",
+                (category, election_date.isoformat()),
+            )
+            connection.executemany(
+                """INSERT INTO official_parent_closures(
+                       category, election_date, parent_url, parent_label,
+                       constituency, level_codes_json, child_pages,
+                       child_urls_json, parent_electors, child_electors,
+                       parent_voters, child_voters, parent_valid_votes,
+                       child_valid_votes, subjects_compared,
+                       subjects_mismatched, status, checked_at, payload_json
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    (
+                        category,
+                        election_date.isoformat(),
+                        row["parent_url"],
+                        row["parent_label"],
+                        row["constituency"],
+                        json.dumps(row["level_codes"], ensure_ascii=False),
+                        len(row["child_urls"]),
+                        json.dumps(row["child_urls"], ensure_ascii=False),
+                        row["parent_electors"],
+                        row["child_electors"],
+                        row["parent_voters"],
+                        row["child_voters"],
+                        row["parent_valid_votes"],
+                        row["child_valid_votes"],
+                        row["subjects_compared"],
+                        row["subjects_mismatched"],
+                        row["status"],
+                        checked_at,
+                        json.dumps(row, ensure_ascii=False, default=str),
+                    )
+                    for row in closures
+                ],
+            )
+            connection.commit()
+        return len(closures)
+
+    def parent_closures(
+        self, *, category: str, election_date: date
+    ) -> list[dict[str, Any]]:
+        with closing(self.connect()) as connection:
+            rows = connection.execute(
+                """SELECT payload_json FROM official_parent_closures
+                    WHERE category=? AND election_date=?
+                    ORDER BY parent_url""",
+                (category, election_date.isoformat()),
+            ).fetchall()
+        return [json.loads(row["payload_json"]) for row in rows]
 
     def store_reconciliation_run(
         self,

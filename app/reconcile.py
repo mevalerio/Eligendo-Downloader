@@ -17,7 +17,7 @@ from .http_client import Download, SafeHttpClient, UpstreamError
 from .schemas import PageResult
 from .scraper import parse_page_html
 from .service import EligendoService
-from .utils import canonical_municipality
+from .utils import canonical_municipality, slug
 
 
 CATEGORY_CODES = {
@@ -162,6 +162,127 @@ def selector_children(html: bytes, source_url: str) -> list[str]:
     return children
 
 
+def _page_subject_votes(page: PageResult) -> dict[tuple[str, str], int]:
+    votes: dict[tuple[str, str], int] = {}
+    for record in page.records:
+        if record.record_type in ("total", "coalition_total") or record.votes is None:
+            continue
+        if record.round not in (None, 1):
+            continue
+        key = (record.record_type, slug(record.name))
+        votes[key] = votes.get(key, 0) + record.votes
+    return votes
+
+
+def _page_valid_votes(page: PageResult) -> int | None:
+    totals = [
+        record.votes
+        for record in page.records
+        if record.record_type == "total"
+        and record.round in (None, 1)
+        and record.votes is not None
+    ]
+    if totals:
+        return sum(totals)
+    lists = [
+        votes for (record_type, _), votes in _page_subject_votes(page).items()
+        if record_type == "list"
+    ]
+    return sum(lists) if lists else None
+
+
+def _summary_int(page: PageResult, field: str) -> int | None:
+    value = page.summary.get(field)
+    return int(value) if isinstance(value, (int, float)) else None
+
+
+def parent_closures(
+    parents: dict[str, PageResult | None],
+    children: dict[str, list[PageResult]],
+) -> list[dict[str, object]]:
+    """Check that the municipality pages under each parent page add up to it.
+
+    In the 1994-2001 Chamber the parent is the single-member college, so a
+    college shared by Ciampino and a piece of Rome must equal their sum.
+    """
+    closures: list[dict[str, object]] = []
+    for parent_url, kids in sorted(children.items()):
+        parent = parents.get(parent_url)
+
+        def total(field: str) -> int | None:
+            values = [_summary_int(kid, field) for kid in kids]
+            return None if None in values else sum(values)  # type: ignore[arg-type]
+
+        child_votes: dict[tuple[str, str], int] = {}
+        for kid in kids:
+            for key, votes in _page_subject_votes(kid).items():
+                child_votes[key] = child_votes.get(key, 0) + votes
+        child_valid = [_page_valid_votes(kid) for kid in kids]
+        row: dict[str, object] = {
+            "parent_url": parent_url,
+            "parent_label": None,
+            "constituency": kids[0].geography.circoscrizione,
+            "level_codes": {},
+            "child_urls": [kid.source_url for kid in kids],
+            "child_labels": [kid.geography.comune for kid in kids],
+            "parent_electors": None,
+            "child_electors": total("elettori"),
+            "parent_voters": None,
+            "child_voters": total("votanti"),
+            "parent_valid_votes": None,
+            "child_valid_votes": None if None in child_valid else sum(child_valid),  # type: ignore[arg-type]
+            "subjects_compared": 0,
+            "subjects_mismatched": 0,
+            "mismatched_subjects": [],
+            "status": "parent_missing",
+        }
+        if parent is None:
+            closures.append(row)
+            continue
+        geography = parent.geography
+        parent_votes = _page_subject_votes(parent)
+        mismatched = sorted(
+            f"{record_type}:{name}"
+            for record_type, name in parent_votes.keys() | child_votes.keys()
+            if parent_votes.get((record_type, name)) != child_votes.get((record_type, name))
+        )
+        row.update(
+            {
+                "parent_label": geography.collegio
+                or geography.provincia
+                or geography.circoscrizione
+                or geography.regione,
+                "level_codes": {
+                    key: value
+                    for key, value in geography.query_codes.items()
+                    if key.startswith(("lev", "ne"))
+                },
+                "parent_electors": _summary_int(parent, "elettori"),
+                "parent_voters": _summary_int(parent, "votanti"),
+                "parent_valid_votes": _page_valid_votes(parent),
+                "subjects_compared": len(parent_votes.keys() | child_votes.keys()),
+                "subjects_mismatched": len(mismatched),
+                "mismatched_subjects": mismatched,
+            }
+        )
+        pairs = [
+            (row["parent_electors"], row["child_electors"]),
+            (row["parent_voters"], row["child_voters"]),
+            (row["parent_valid_votes"], row["child_valid_votes"]),
+        ]
+        if mismatched or any(
+            official is not None and pieces is not None and official != pieces
+            for official, pieces in pairs
+        ):
+            row["status"] = "mismatch"
+        elif any(official is None or pieces is None for official, pieces in pairs):
+            row["status"] = "incomplete"
+        else:
+            row["status"] = "closed"
+        closures.append(row)
+    return closures
+
+
 def crawl_and_reconcile(
     *,
     settings: Settings,
@@ -180,6 +301,10 @@ def crawl_and_reconcile(
     frontier = deque([root_url(category, election_date)])
     seen: set[str] = set()
     municipality_pages: dict[tuple[str, str], list[PageResult]] = defaultdict(list)
+    # Each municipality page is checked against the page whose selector led to it.
+    parent_of: dict[str, str] = {}
+    parent_pages: dict[str, PageResult | None] = {}
+    children_of: dict[str, list[PageResult]] = defaultdict(list)
     network_requests = 0
     errors = 0
     complete = True
@@ -266,18 +391,29 @@ def crawl_and_reconcile(
                         str(page.election.date),
                     )
                     municipality_pages[key].append(page)
+                if url in parent_of:
+                    children_of[parent_of[url]].append(page)
                 continue
             if html is None:
                 continue
-            frontier.extend(
-                selector_children(
-                    html,
-                    page.source_url if page is not None else download.final_url,
-                )
+            parent_pages[url] = page
+            children = selector_children(
+                html,
+                page.source_url if page is not None else download.final_url,
             )
+            for child in children:
+                parent_of.setdefault(child, url)
+            frontier.extend(children)
 
         verified = 0
+        closures: list[dict[str, object]] = []
         if complete:
+            closures = parent_closures(parent_pages, children_of)
+            database.store_parent_closures(
+                category=category,
+                election_date=election_date,
+                closures=closures,
+            )
             for pages in municipality_pages.values():
                 service.verify_official_page_results(
                     pages,
@@ -298,6 +434,10 @@ def crawl_and_reconcile(
             "pages_seen": len(seen),
             "municipality_pages": sum(len(pages) for pages in municipality_pages.values()),
             "municipalities_verified": verified,
+            "parent_closures": len(closures),
+            "parent_closure_mismatches": sum(
+                row["status"] == "mismatch" for row in closures
+            ),
             "errors": errors,
         }
         database.store_reconciliation_run(

@@ -226,7 +226,8 @@ it with the selected local aggregation layer.
 | `insieme_completo` | boolean | Whether the caller declared that every municipality component page is present |
 | `tipo_elezione` | text | `camera`, `senato`, `europee`, `regionali`, or `comunali` |
 | `data` | ISO date | Election date shared by every page |
-| `comune` | text | Municipality shared by every page |
+| `circoscrizione` | text or null | Constituency; identifies the municipality when the pages publish no province or region (Chamber 1994-2001) |
+| `comune` | text | Canonical municipality shared by every page, e.g. `ROMA` for `Roma centro` and `Parte di Comune ROMA` |
 | `tolleranza_relativa` | number | Allowed relative difference; default `0` |
 | `stato` | text | `exact_match`, `within_tolerance`, `mismatch`, or `local_data_missing` |
 | `riepilogo` | array | Official and reconstructed electors, voters, and valid votes, with differences |
@@ -234,6 +235,7 @@ it with the selected local aggregation layer.
 | `partiti_coincidenti` | integer | Parties matching exactly or within the requested tolerance |
 | `partiti_non_coincidenti` | integer | Mismatched or missing parties |
 | `partiti` | array | Party-level official votes, reconstructed votes, differences, and status |
+| `componenti` | array | One entry per page: `source_url`, original label (`etichetta`), `collegio` when the heading names it, website level codes (`codici`; `lev2` is the college number in the 1994-2001 Chamber), electors, and voters |
 | `risultati_ufficiali` | array | Normalised candidate, list, option, round, vote, percentage, and seat records aggregated across the supplied pages |
 
 Only a stored verification with `complete_set=true` may supply authoritative
@@ -251,7 +253,8 @@ historical records without a round use `-1` internally.
 `official_verification_queue` stores resumable municipality work items seeded
 from `election_results`. Its states are `pending`, `partial`, `verified`, and
 `failed`. The municipality key includes province when available, otherwise
-region, so homonymous municipalities remain separate. An absent round is stored
+region, otherwise constituency (`p:`, `r:`, or `c:` prefix), so homonymous
+municipalities remain separate. An absent round is stored
 internally as `-1` and exposed by the API as `null`.
 
 `official_reconciliation_runs` is the election-level restart ledger. Its key is
@@ -259,3 +262,22 @@ internally as `-1` and exposed by the API as `null`.
 `unavailable`, or `failed`. `result_json` records request and page counts, while
 `last_error` retains a terminal failure message. The all-election runner skips
 `complete` and `unavailable` keys unless explicitly told to retry them.
+
+`official_parent_closures` checks that the municipality pages reached from one
+parent page add up to that page. In the 1994-2001 Chamber the parent is the
+single-member college: the Roma - Ciampino college (104,499 electors in 1996)
+must equal CIAMPINO plus `parte del comune di Roma`. Elsewhere the parent is the
+level above the municipality, usually the province. Rows are replaced for each
+completed election crawl and served by
+`GET /api/v1/history/reconciliation/parent-closures?tipo_elezione=camera&data=1996-04-21`.
+
+| Column | Definition |
+|---|---|
+| `parent_url`, `parent_label` | Parent page and its college, province, constituency, or region label |
+| `level_codes_json` | Website level codes of the parent page |
+| `child_pages`, `child_urls_json` | Municipality pages found under the parent |
+| `parent_electors`, `child_electors` | Parent total and sum of the municipality pages |
+| `parent_voters`, `child_voters` | As above, for voters |
+| `parent_valid_votes`, `child_valid_votes` | As above, for valid votes |
+| `subjects_compared`, `subjects_mismatched` | Lists or candidates compared, and those whose sums differ |
+| `status` | `closed` (every figure equal), `mismatch`, `incomplete` (a figure unpublished), or `parent_missing` (no result table on the parent page) |

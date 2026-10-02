@@ -187,6 +187,27 @@ def get_official_verification_queue(
     return {"count": count, "limit": limit, "offset": offset, "rows": rows}
 
 
+@app.get(
+    "/api/v1/history/reconciliation/parent-closures",
+    tags=["history"],
+)
+def get_parent_closures(
+    tipo_elezione: str,
+    data: date,
+    stato: str | None = None,
+) -> dict[str, object]:
+    """Show whether municipality pages add up to their parent page.
+
+    For the 1994-2001 Chamber the parent page is the single-member college.
+    """
+    rows = [
+        row
+        for row in database.parent_closures(category=tipo_elezione, election_date=data)
+        if stato is None or row["status"] == stato
+    ]
+    return {"count": len(rows), "rows": rows}
+
+
 @app.post(
     "/api/v1/archives/import",
     response_model=ArchiveImportResult,

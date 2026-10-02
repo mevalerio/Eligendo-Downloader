@@ -1,13 +1,16 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from urllib.parse import parse_qs, urlparse
 
+from app.database import Database
 from app.http_client import Download, UpstreamError
 from app.reconcile import (
     download_with_backoff,
     heading_election,
+    parent_closures,
     root_url,
     selector_children,
 )
+from app.schemas import ElectionInfo, Geography, PageResult, ResultRecord
 
 
 def test_root_url_uses_official_category_and_date() -> None:
@@ -111,3 +114,98 @@ def test_download_with_backoff_does_not_retry_permanent_error(monkeypatch) -> No
             max_bytes=100,
             max_attempts=3,
         )
+
+
+def _page(url, *, comune, electors, voters, parties, collegio=None):
+    return PageResult(
+        source_url=url,
+        retrieved_at=datetime.now(timezone.utc),
+        election=ElectionInfo(code="C", name="Camera", date=date(1996, 4, 21)),
+        geography=Geography(
+            circoscrizione="LAZIO 1",
+            collegio=collegio,
+            comune=comune,
+            query_codes={"lev1": "15", "lev2": "12"},
+        ),
+        summary={"elettori": electors, "votanti": voters},
+        records=[
+            ResultRecord(record_type="list", name=name, votes=votes)
+            for name, votes in parties
+        ]
+        + [
+            ResultRecord(
+                record_type="total",
+                name="TOTALI",
+                votes=sum(votes for _, votes in parties),
+            )
+        ],
+    )
+
+
+def test_parent_closure_matches_college_shared_with_ciampino(tmp_path) -> None:
+    college = "https://elezionistorico.interno.gov.it/index.php?lev2=12"
+    parent = _page(
+        college,
+        comune=None,
+        collegio="Roma - Ciampino",
+        electors=104_499,
+        voters=93_276,
+        parties=(("ALLEANZA NAZIONALE", 29_951), ("PDS", 23_067)),
+    )
+    ciampino = _page(
+        f"{college}&lev3=1",
+        comune="CIAMPINO",
+        electors=29_259,
+        voters=26_364,
+        parties=(("ALLEANZA NAZIONALE", 8_000), ("PDS", 7_000)),
+    )
+    rome = _page(
+        f"{college}&lev3=2",
+        comune="parte del comune di Roma",
+        electors=75_240,
+        voters=66_912,
+        parties=(("ALLEANZA NAZIONALE", 21_951), ("PDS", 16_067)),
+    )
+
+    closures = parent_closures({college: parent}, {college: [ciampino, rome]})
+
+    assert len(closures) == 1
+    closure = closures[0]
+    assert closure["status"] == "closed"
+    assert closure["parent_label"] == "Roma - Ciampino"
+    assert closure["parent_electors"] == closure["child_electors"] == 104_499
+    assert closure["parent_voters"] == closure["child_voters"] == 93_276
+    assert closure["child_labels"] == ["CIAMPINO", "parte del comune di Roma"]
+    assert closure["level_codes"]["lev2"] == "12"
+
+    database = Database(tmp_path / "closures.sqlite3")
+    database.store_parent_closures(
+        category="camera", election_date=date(1996, 4, 21), closures=closures
+    )
+    stored = database.parent_closures(category="camera", election_date=date(1996, 4, 21))
+    assert [row["status"] for row in stored] == ["closed"]
+
+
+def test_parent_closure_flags_missing_piece() -> None:
+    college = "https://elezionistorico.interno.gov.it/index.php?lev2=12"
+    parent = _page(
+        college,
+        comune=None,
+        electors=104_499,
+        voters=93_276,
+        parties=(("PDS", 23_067),),
+    )
+    ciampino = _page(
+        f"{college}&lev3=1",
+        comune="CIAMPINO",
+        electors=29_259,
+        voters=26_364,
+        parties=(("PDS", 7_000),),
+    )
+
+    closure = parent_closures({college: parent}, {college: [ciampino]})[0]
+
+    assert closure["status"] == "mismatch"
+    assert closure["mismatched_subjects"] == ["list:pds"]
+    missing = parent_closures({college: None}, {college: [ciampino]})[0]
+    assert missing["status"] == "parent_missing"
