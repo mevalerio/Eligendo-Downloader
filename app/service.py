@@ -14,6 +14,7 @@ from .archive import parse_zip_archive
 from .catalogue import CATALOGUE_URL, catalogue_matches, parse_catalogue_html
 from .config import Settings
 from .database import Database
+from .district_registry import legal_colleges
 from .electoral_laws import DISTRICT_MAP_VERSIONS, ELECTORAL_LAWS, LAW_BY_ID
 from .history import ELECTION_CATEGORIES
 from .http_client import Download, SafeHttpClient
@@ -131,6 +132,7 @@ class EligendoService:
         relative_tolerance: float = 0.0,
         complete_set: bool = False,
         _pages: list[PageResult] | None = None,
+        _closures: dict[str, dict[str, object]] | None = None,
     ) -> dict[str, object]:
         """Aggregate official split pages and compare them with local totals."""
         unique_urls = list(dict.fromkeys(urls))
@@ -372,6 +374,47 @@ class EligendoService:
         else:
             status = "exact_match"
 
+        legal_check = self._legal_piece_count(category, municipality, pages)
+        closures = (
+            _closures
+            if _closures is not None
+            else self.database.parent_closures_for_children(
+                category=category,
+                election_date=page.election.date,
+                child_urls=[component.source_url for component in pages],
+            )
+        )
+        closure_check = {
+            "stato": (
+                "not_available"
+                if not closures
+                else "pass"
+                if all(
+                    closures.get(component.source_url, {}).get("status") == "closed"
+                    for component in pages
+                )
+                else "fail"
+            ),
+            "collegi": [
+                {
+                    "source_url": component.source_url,
+                    "pagina_padre": closures.get(component.source_url, {}).get("parent_url"),
+                    "etichetta_padre": closures.get(component.source_url, {}).get("parent_label"),
+                    "stato": closures.get(component.source_url, {}).get("status"),
+                }
+                for component in pages
+            ],
+        }
+        reasons = []
+        if status != "exact_match":
+            reasons.append("piece_match")
+        if closure_check["stato"] != "pass":
+            reasons.append(f"college_closure_{closure_check['stato']}")
+        if legal_check["stato"] == "mismatch":
+            reasons.append("legal_piece_count")
+        if not complete_set:
+            reasons.append("page_set_not_declared_complete")
+
         verification = {
             "source_url": page.source_url,
             "source_urls": [component.source_url for component in pages],
@@ -407,6 +450,11 @@ class EligendoService:
             "partiti_coincidenti": party_matches,
             "partiti_non_coincidenti": party_mismatches,
             "partiti": parties,
+            "completezza": "complete" if not reasons else "incomplete",
+            "completezza_motivi": reasons,
+            "verifica_chiusura_collegi": closure_check,
+            "verifica_conteggio_legale": legal_check,
+            "pezzi_open_data": int(audit["parti_rilevate"]) if audit is not None else 0,
             "componenti": [
                 {
                     "source_url": component.source_url,
@@ -442,6 +490,7 @@ class EligendoService:
         store: bool = True,
         relative_tolerance: float = 0.0,
         complete_set: bool = False,
+        closures: dict[str, dict[str, object]] | None = None,
     ) -> dict[str, object]:
         """Verify already downloaded pages without fetching them a second time."""
         return self.verify_official_municipality_pages(
@@ -450,7 +499,50 @@ class EligendoService:
             relative_tolerance=relative_tolerance,
             complete_set=complete_set,
             _pages=pages,
+            _closures=closures,
         )
+
+    @staticmethod
+    def _legal_piece_count(
+        category: str, municipality: str, pages: list[PageResult]
+    ) -> dict[str, object]:
+        """Compare the website's college pieces with the decree's college table."""
+        page = pages[0]
+        geography = (
+            page.geography.circoscrizione
+            if category == "camera"
+            else page.geography.regione
+        )
+        legal = legal_colleges(
+            category=category,
+            year=page.election.date.year,
+            municipality=municipality,
+            geography=geography,
+        )
+        website = sorted(
+            {
+                int(component.geography.query_codes["lev2"])
+                for component in pages
+                if str(component.geography.query_codes.get("lev2", "")).isdigit()
+            }
+        )
+        if legal is None:
+            return {"stato": "not_available", "collegi_pagine": website}
+        legal_set = legal["collegi"]
+        if not legal_set:
+            outcome = "not_found"
+        elif len(website) == len(pages):
+            outcome = "pass" if website == legal_set else "mismatch"
+        else:
+            outcome = "pass" if len(pages) == len(legal_set) else "mismatch"
+        return {
+            "stato": outcome,
+            "mappa_collegi_versione": legal["mappa_collegi_versione"],
+            "collegi_legali": legal_set,
+            "collegi_pagine": website,
+            "pagine": len(pages),
+            "fonti_ids": legal["fonti_ids"],
+        }
 
     def electoral_laws(self) -> list[dict[str, object]]:
         law_dir = self.settings.data_dir / "electoral_laws"

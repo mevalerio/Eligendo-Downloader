@@ -414,11 +414,17 @@ def crawl_and_reconcile(
                 election_date=election_date,
                 closures=closures,
             )
+            closure_by_child = {
+                str(url): row
+                for row in closures
+                for url in row["child_urls"]  # type: ignore[union-attr]
+            }
             for pages in municipality_pages.values():
                 service.verify_official_page_results(
                     pages,
                     store=True,
                     complete_set=True,
+                    closures=closure_by_child,
                 )
                 verified += 1
                 if verified % 100 == 0:

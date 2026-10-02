@@ -112,6 +112,11 @@ class OfficialMunicipalityVerificationResponse(BaseModel):
     partiti_coincidenti: int
     partiti_non_coincidenti: int
     partiti: list[OfficialPartyComparison]
+    completezza: Literal["complete", "incomplete"] | None = None
+    completezza_motivi: list[str] = Field(default_factory=list)
+    verifica_chiusura_collegi: dict[str, Any] = Field(default_factory=dict)
+    verifica_conteggio_legale: dict[str, Any] = Field(default_factory=dict)
+    pezzi_open_data: int | None = None
     componenti: list[dict[str, Any]] = Field(default_factory=list)
     risultati_ufficiali: list[dict[str, Any]] = Field(default_factory=list)
 

@@ -202,6 +202,7 @@ CREATE TABLE IF NOT EXISTS official_municipality_verifications (
     official_valid_votes INTEGER,
     source_urls_json TEXT NOT NULL,
     payload_json TEXT NOT NULL,
+    completeness TEXT,
     UNIQUE(category, election_date, municipality_key)
 );
 
@@ -314,6 +315,17 @@ class Database:
                     "PRAGMA table_info(official_verification_queue)"
                 )
             }
+            verification_columns = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(official_municipality_verifications)"
+                )
+            }
+            if "completeness" not in verification_columns:
+                connection.execute(
+                    "ALTER TABLE official_municipality_verifications "
+                    "ADD COLUMN completeness TEXT"
+                )
             if "constituency" not in queue_columns:
                 connection.execute(
                     "ALTER TABLE official_verification_queue ADD COLUMN constituency TEXT"
@@ -460,8 +472,8 @@ class Database:
                     category, election_date, municipality, municipality_key,
                     verified_at, status, complete_set, official_pages, official_electors,
                     official_voters, official_valid_votes, source_urls_json,
-                    payload_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    payload_json, completeness
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(category, election_date, municipality_key) DO UPDATE SET
                     municipality=excluded.municipality,
                     verified_at=excluded.verified_at,
@@ -472,7 +484,8 @@ class Database:
                     official_voters=excluded.official_voters,
                     official_valid_votes=excluded.official_valid_votes,
                     source_urls_json=excluded.source_urls_json,
-                    payload_json=excluded.payload_json
+                    payload_json=excluded.payload_json,
+                    completeness=excluded.completeness
                 """,
                 (
                     result["tipo_elezione"],
@@ -488,6 +501,7 @@ class Database:
                     summary.get("voti_validi"),
                     json.dumps(result["source_urls"], ensure_ascii=False),
                     json.dumps(result, ensure_ascii=False, default=str),
+                    result.get("completezza"),
                 ),
             )
             verification_id = int(
@@ -781,6 +795,26 @@ class Database:
             )
             connection.commit()
         return len(closures)
+
+    def parent_closures_for_children(
+        self, *, category: str, election_date: date, child_urls: list[str]
+    ) -> dict[str, dict[str, Any]]:
+        """Map each municipality page URL to the closure of its parent page."""
+        found: dict[str, dict[str, Any]] = {}
+        with closing(self.connect()) as connection:
+            for url in child_urls:
+                row = connection.execute(
+                    """SELECT payload_json FROM official_parent_closures
+                        WHERE category=? AND election_date=?
+                          AND EXISTS (
+                              SELECT 1 FROM json_each(child_urls_json)
+                               WHERE json_each.value = ?
+                          )""",
+                    (category, election_date.isoformat(), url),
+                ).fetchone()
+                if row is not None:
+                    found[url] = json.loads(row["payload_json"])
+        return found
 
     def parent_closures(
         self, *, category: str, election_date: date

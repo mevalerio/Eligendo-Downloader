@@ -129,6 +129,39 @@ which describes its records as derived from ISTAT and Agenzia delle Entrate
 data. This is a secondary identification aid; Gazzetta Ufficiale and Ministry
 election files remain the authoritative electoral sources.
 
+## Completeness of a municipality reconstruction
+
+Each official verification now records whether the reconstruction is complete
+(`completezza`) and why not (`completezza_motivi`):
+
+1. piece match: website pieces equal the Open Data pieces exactly
+   (`stato = exact_match`);
+2. college closure: every college page that a piece belongs to equals the sum
+   of its municipality pages (`verifica_chiusura_collegi`, see
+   `official_parent_closures`);
+3. legal piece count: the colleges of the pieces equal the colleges the
+   decree assigns (`verifica_conteggio_legale`, from the registry in
+   [District-map versions](DISTRICT_MAP_VERSIONS.md)); `not_available` where no
+   registry covers the election.
+
+A reconstruction is `complete` only when 1 and 2 pass, the legal count does not
+contradict them, and the page set was declared complete.
+
+The registry exposed these source problems in the 1994 Chamber election:
+
+- Palermo has six colleges (9-14). The website crawl holds no Palermo page for
+  college 9 ("Palermo - Capaci"); its college page lists only Capaci, Isola
+  delle Femmine, Torretta and Ustica.
+- Open Data gives that Palermo piece 566,075 electors but 62,113 voters; the
+  figure is the whole city's electorate (1996: 82,445). Palermo 1994 electors
+  are therefore inflated by about 480,000.
+- Open Data gives the Reggio di Calabria piece of college 16 147,494 electors;
+  the website reports 49,247 (1996: 50,826).
+- Rome's 1996 Senate/Camera elector ratio of 0.942 reported earlier omitted the
+  Ciampino and Fiumicino pieces, labelled `parte del comune di Roma` in 1996.
+  With all 24 pieces Rome has 2,307,090 Camera electors and a ratio of 0.885,
+  against 0.880 nationally.
+
 ## Full-history result
 
 The baseline adjacent-only run covered 28 historically split municipalities and 1,020

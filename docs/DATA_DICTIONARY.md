@@ -235,6 +235,11 @@ it with the selected local aggregation layer.
 | `partiti_coincidenti` | integer | Parties matching exactly or within the requested tolerance |
 | `partiti_non_coincidenti` | integer | Mismatched or missing parties |
 | `partiti` | array | Party-level official votes, reconstructed votes, differences, and status |
+| `completezza` | text | `complete` or `incomplete`; see the split-municipality audit |
+| `completezza_motivi` | array | Failed conditions: `piece_match`, `college_closure_fail`, `college_closure_not_available`, `legal_piece_count`, `page_set_not_declared_complete` |
+| `verifica_chiusura_collegi` | object | `stato` (`pass`, `fail`, `not_available`) and, per page, its parent college page and closure status |
+| `verifica_conteggio_legale` | object | `stato` (`pass`, `mismatch`, `not_found`, `not_available`), the decree's colleges (`collegi_legali`), the pages' colleges (`collegi_pagine`), and the map version |
+| `pezzi_open_data` | integer | Open Data pieces (college fragments) in the selected local layer |
 | `componenti` | array | One entry per page: `source_url`, original label (`etichetta`), `collegio` when the heading names it, website level codes (`codici`; `lev2` is the college number in the 1994-2001 Chamber), electors, and voters |
 | `risultati_ufficiali` | array | Normalised candidate, list, option, round, vote, percentage, and seat records aggregated across the supplied pages |
 

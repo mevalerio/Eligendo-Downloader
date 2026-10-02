@@ -75,6 +75,62 @@ or either fallback adjacent same-chamber ratio, falls outside the tolerance.
 Arithmetic contradictions, such as result votes above voters or electors,
 remain invalid regardless of the temporal comparison.
 
+## College composition registry (1994-2001)
+
+`app/district_maps/<district_map_version>.csv` lists, for one map version,
+every college and the municipalities, city zones, or described parts of a city
+that compose it. It is the legal reference for how many college pieces a
+municipality should have. Tables exist for
+`camera-mattarellum-1993-corrected` (475 colleges, 8,650 entries) and
+`senato-mattarellum-1993-corrected` (232 colleges, 8,480 entries).
+
+| Column | Definition |
+|---|---|
+| `geography` | Chamber constituency or Senate region, with the Open Data label |
+| `college` | College number, the same numbering as the website's `lev2` code |
+| `municipality` | Canonical municipality; empty when the OCR'd name could not be resolved safely |
+| `entry_type` | `whole` (a municipality), `zone` (a zone of a split city, e.g. `RM-MONTI`), or `described_part` (part of a city defined by street boundaries or prose) |
+| `entry_text` | Zone name, or the boundary description |
+| `source_page` | Printed page of the Gazzetta supplement |
+| `ocr_text`, `match_score` | Original OCR text and the name-match confidence, for review |
+
+The decrees were published as a scanned supplement without a text layer
+(S.O. 120, GU 302, 27 December 1993). `scripts/extract_district_maps_1993.py`
+rebuilds the tables with Tesseract: it reads the college-number column
+separately, uses the table layout (number column, vertical gaps, page-top
+number repeats) to find colleges, assigns each section to a constituency or
+region by the municipalities it lists, and resolves OCR'd names against the
+1994 Open Data names, leaving ambiguous matches empty. Re-run it with:
+
+```powershell
+python scripts/extract_district_maps_1993.py ocr --pdf gu1993.pdf --work work
+python scripts/extract_district_maps_1993.py build --work work --database $env:LOCALAPPDATA\Eligendo\eligendo.sqlite3
+```
+
+Validation against the 1994 Chamber website pages (constituency, `lev2`,
+municipality for 8,191 pages):
+
+- every constituency has the same number of colleges as Open Data;
+- 28 of 30 municipalities with several colleges have exactly the website's
+  college set, including Rome (1-24), Naples (1-9), Milan (1-11) and Turin
+  (1-8); the exceptions are an OCR tie for TAINO and Palermo, below;
+- about 1% of municipality-college pairs still differ, mostly short names the
+  OCR garbled. For the Senate, 153 of 232 colleges match Open Data membership
+  exactly and 65 more differ by at most two unresolved names; no municipality
+  is assigned to a wrong college there.
+
+The printed supplement contains defects that the extractor handles explicitly:
+
+- Chamber PIEMONTE 2: the page after college 2 restarts with "1" and prints
+  "2" again; the January 1994 errata assigns these entries to college 2;
+- Chamber CALABRIA: a stray "SENATO DELLA REPUBBLICA - Regione VALLE D'AOSTA"
+  heading appears mid-table (printed page 310), the same misprint the Senate
+  errata corrects for Molise;
+- Chamber SICILIA 2: college 4 begins at the top of printed page 320 without
+  its number (`FORCED_STARTS` in the extractor);
+- Chamber CAMPANIA 2: the Salerno colleges (printed page 296) are set in a
+  different typeface and described in prose.
+
 ## Major-city sense check
 
 The 35 per cent check was run on the complete imported history for ten major

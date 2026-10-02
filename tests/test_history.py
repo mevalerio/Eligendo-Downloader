@@ -1,3 +1,4 @@
+import csv
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -1395,4 +1396,97 @@ def test_constituency_keeps_homonymous_municipalities_separate(
     assert count == 2
     with pytest.raises(ValueError, match="same constituency"):
         service.verify_official_municipality_pages(list(pages), store=False)
+    service.close()
+
+
+def test_rome_completeness_needs_closure_and_legal_count(tmp_path, monkeypatch) -> None:
+    """Three of Rome's 24 pieces: the decree registry flags the missing 21."""
+    from app import district_registry
+    from app.district_registry import REGISTRY_FIELDS, registry_rows
+
+    database = Database(tmp_path / "rome-checks.sqlite3")
+    pieces = (
+        ("ROMA", "Roma centro", "1", 1000, 800, 300, 400),
+        ("ROMA", "Roma - Trieste", "2", 900, 700, 350, 250),
+        ("PARTE DI COMUNE DI ROMA", "Parte di Comune ROMA", "12", 700, 600, 200, 300),
+    )
+    rows = [
+        source_row(
+            {
+                "collegio": f"Roma - collegio {college}",
+                "lista": party,
+                "voti_lista": str(votes),
+                "elettori": str(electors),
+                "votanti": str(voters),
+            },
+            row_number=2 + index * 2 + offset,
+            region=None,
+            province=None,
+            municipality=od_label,
+            circoscrizione="LAZIO 1",
+        )
+        for index, (od_label, _, college, electors, voters, fi, pds) in enumerate(pieces)
+        for offset, (party, votes) in enumerate((("FORZA ITALIA", fi), ("PDS", pds)))
+    ]
+    database.replace_archive(
+        entry("camera", date(1994, 3, 27), "camera-19940327.zip"),
+        sha256="rome-checks",
+        rows=rows,
+    )
+    service = EligendoService(_settings(tmp_path, "rome-checks.sqlite3"), database)
+    base = "https://elezionistorico.interno.gov.it/index.php?tpel=C&lev2="
+    pages = [
+        _mattarellum_page(
+            f"{base}{college}",
+            constituency="LAZIO 1",
+            label=label,
+            college=college,
+            electors=electors,
+            voters=voters,
+            parties=(("FORZA ITALIA", fi), ("PDS", pds)),
+        )
+        for _, label, college, electors, voters, fi, pds in pieces
+    ]
+
+    # With the shipped 1993 registry, Rome has 24 colleges and only 3 pages were given.
+    result = service.verify_official_page_results(pages, store=False, complete_set=True)
+    assert result["stato"] == "exact_match"
+    assert result["pezzi_open_data"] == 3
+    legal = result["verifica_conteggio_legale"]
+    assert legal["stato"] == "mismatch"
+    assert legal["collegi_legali"] == list(range(1, 25))
+    assert legal["collegi_pagine"] == [1, 2, 12]
+    assert result["completezza"] == "incomplete"
+    assert result["completezza_motivi"] == ["college_closure_not_available", "legal_piece_count"]
+
+    # A registry that lists exactly these colleges, plus closed college pages: complete.
+    monkeypatch.setattr(district_registry, "REGISTRY_DIR", tmp_path)
+    registry_rows.cache_clear()
+    with (tmp_path / "camera-mattarellum-1993-corrected.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=REGISTRY_FIELDS)
+        writer.writeheader()
+        for college in (1, 2, 12):
+            writer.writerow({"map_version": "camera-mattarellum-1993-corrected", "geography": "LAZIO 1",
+                             "college": college, "municipality": "ROMA", "entry_type": "zone"})
+    try:
+        closures = {page.source_url: {"status": "closed", "parent_url": f"{page.source_url}&parent"} for page in pages}
+        result = service.verify_official_page_results(
+            pages, store=True, complete_set=True, closures=closures
+        )
+        assert result["verifica_conteggio_legale"]["stato"] == "pass"
+        assert result["verifica_chiusura_collegi"]["stato"] == "pass"
+        assert result["completezza"] == "complete"
+        with database.connect() as connection:
+            stored = connection.execute(
+                "SELECT completeness FROM official_municipality_verifications"
+            ).fetchone()[0]
+        assert stored == "complete"
+
+        closures[pages[2].source_url] = {"status": "mismatch"}
+        result = service.verify_official_page_results(
+            pages, store=False, complete_set=True, closures=closures
+        )
+        assert result["completezza_motivi"] == ["college_closure_fail"]
+    finally:
+        registry_rows.cache_clear()
     service.close()
